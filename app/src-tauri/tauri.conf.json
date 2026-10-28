@@ -1,0 +1,60 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Vozbit",
+  "version": "0.5.8",
+  "identifier": "com.voicetext.local",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build",
+    "devUrl": "http://localhost:5173",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Vozbit",
+        "width": 360,
+        "height": 608,
+        "minWidth": 360,
+        "minHeight": 500,
+        "backgroundColor": "#f8faf8"
+      },
+      {
+        "label": "overlay",
+        "title": "Vozbit - estado",
+        "url": "index.html?overlay=1",
+        "width": 216,
+        "height": 58,
+        "resizable": false,
+        "decorations": false,
+        "shadow": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "visible": false,
+        "focus": false,
+        "focusable": false,
+        "backgroundColor": "#00000000",
+        "transparent": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; connect-src ipc: http://ipc.localhost; img-src 'self' asset: http://asset.localhost; style-src 'self' 'unsafe-inline'"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "resources": ["resources/observe-correction.ps1", "resources/correction-diff.ps1", "resources/whisper/*", "resources/parakeet/*", "resources/models/ggml-base-q5_1.bin", "resources/models/ggml-silero-v6.2.0.bin", "resources/models/ultra-q8_0.gguf", "resources/models/silero-vad-f16.gguf", "resources/THIRD_PARTY_LICENSES.txt"],
+    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/icon.ico"],
+    "windows": {
+      "webviewInstallMode": {
+        "type": "offlineInstaller"
+      },
+      "nsis": {
+        "displayLanguageSelector": false,
+        "installMode": "currentUser"
+      }
+    }
+  }
+}

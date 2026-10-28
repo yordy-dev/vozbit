@@ -1,0 +1,31 @@
+# Research material, original app artifacts, local profiles and diagnostic binaries.
+/analysis/
+
+# Historical/private working notes; public product docs live in the root README.
+/docs/
+
+# Generated frontend and Rust outputs.
+/app/node_modules/
+/app/dist/
+/app/src-tauri/target/
+
+# Large model weights are distributed as GitHub Release assets.
+/app/src-tauri/resources/models/ggml-base-q5_1.bin
+/app/src-tauri/resources/models/ultra-q8_0.gguf
+
+# Local smoke-test captures, audio and installed application snapshots.
+/app/tests/bench-local/
+/app/tests/installed-*/
+/app/tests/**/*.exe
+/app/tests/**/*.wav
+/app/tests/**/*.err
+/app/tests/**/*.out
+/app/tests/**/*.png
+
+# Local secrets and environment configuration.
+.env
+.env.*
+!.env.example
+
+# Temporary browser captures.
+.playwright-mcp/

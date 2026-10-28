@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "overlay",
+  "description": "El indicador recibe estado y permite arrastre sin controles de grabación.",
+  "windows": ["overlay"],
+  "permissions": ["core:event:default"]
+}

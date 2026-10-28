@@ -1,0 +1,20 @@
+.overlay-document,.overlay-document body,.overlay-document #root{width:100%;height:100%;min-width:0!important;margin:0;overflow:hidden!important;background:transparent!important;color:#f5f7f5;font-family:"Segoe UI",sans-serif}
+.overlay-document #root{padding:7px!important;box-sizing:border-box}
+.overlay-shell{width:100%;height:100%;box-sizing:border-box;display:flex;align-items:center;gap:11px;padding:0 12px;border:1px solid rgba(255,255,255,.12);border-radius:999px;background:rgba(60,66,66,var(--overlay-opacity,1));box-shadow:0 2px 6px rgba(0,0,0,.18);user-select:none;cursor:grab}
+.overlay-shell:active{cursor:grabbing}
+.overlay-brand{display:flex;align-items:center;justify-content:center;flex:0 0 20px;color:#65df72}
+.overlay-mark{width:20px;height:20px}
+.overlay-divider{width:1px;height:19px;flex:none;background:rgba(255,255,255,.17)}
+.overlay-wave{height:23px;min-width:0;flex:1;display:flex;align-items:center;justify-content:space-between;gap:2px}
+.overlay-wave i{display:block;width:2px;min-width:2px;height:var(--bar-height);max-height:20px;border-radius:2px;background:#65df72;transition:height 90ms}
+.overlay-shell.state-idle .overlay-wave i{height:3px;opacity:.55}
+.overlay-shell.state-processing .overlay-wave i,.overlay-shell.state-completing .overlay-wave i,.overlay-shell.state-done .overlay-wave i{height:8px;background:#956f43;opacity:.52;transform-origin:center;transition:background 100ms,box-shadow 100ms,opacity 100ms,height 100ms}
+.overlay-shell.state-processing .overlay-wave i:nth-child(3n),.overlay-shell.state-completing .overlay-wave i:nth-child(3n),.overlay-shell.state-done .overlay-wave i:nth-child(3n){height:14px}
+.overlay-shell.state-processing .overlay-wave i:nth-child(4n),.overlay-shell.state-completing .overlay-wave i:nth-child(4n),.overlay-shell.state-done .overlay-wave i:nth-child(4n){height:18px}
+.overlay-shell.state-processing .overlay-wave i.wave-reached,.overlay-shell.state-completing .overlay-wave i.wave-reached,.overlay-shell.state-done .overlay-wave i{background:#e5a83e;opacity:1}
+.overlay-shell.state-processing .overlay-wave i.wave-head,.overlay-shell.state-completing .overlay-wave i.wave-head{background:#ffe4a0;box-shadow:0 0 8px #ffbf50;opacity:1;animation:wave-glow 700ms ease-in-out infinite alternate}
+.overlay-error-message{display:flex;align-items:center;gap:7px;min-width:0;flex:1;color:#ffaaa0;font-size:11px;font-weight:600;white-space:nowrap}
+.overlay-error-icon{display:flex;align-items:center;justify-content:center;flex:none;width:15px;height:15px;border:1.5px solid currentColor;border-radius:50%;font-size:10px;line-height:1}
+.overlay-shell.state-done .overlay-wave i{background:#ffe4a0;box-shadow:0 0 5px #ffc553}
+@keyframes wave-glow{from{transform:scaleY(.85);box-shadow:0 0 3px #ffbf50}to{transform:scaleY(1.2);box-shadow:0 0 10px #ffcf68}}
+@media(prefers-reduced-motion:reduce){.overlay-wave i{animation:none!important;transition:none}}
