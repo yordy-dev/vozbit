@@ -1,8 +1,18 @@
 # Research material, original app artifacts, local profiles and diagnostic binaries.
 /analysis/
 
-# Historical/private working notes; public product docs live in the root README.
-/docs/
+# Historical/private working notes. Publish only the curated README media.
+/docs/*
+!/docs/images/
+/docs/images/*
+!/docs/images/01-inicio.png
+!/docs/images/03-diccionario.png
+!/docs/images/04-configuracion.png
+!/docs/media/
+/docs/media/*
+!/docs/media/vozbit-demo.gif
+!/docs/media/vozbit-demo.mp4
+!/docs/media/vozbit-indicator-demo.gif
 
 # Generated frontend and Rust outputs.
 /app/node_modules/

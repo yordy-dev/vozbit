@@ -1,62 +1,169 @@
-# Vozbit
+<div align="center">
+  <img src="app/src-tauri/icons/icon.png" alt="Icono de Vozbit" width="104" />
 
-**Dicta en Windows y convierte tu voz en texto con modelos que se ejecutan localmente.** Vozbit está pensado para escribir en chats, documentos y editores de código.
+  # Vozbit
 
-[Descargar Vozbit para Windows x64](https://github.com/yordy-dev/vozbit/releases/latest) · [Ver todas las versiones](https://github.com/yordy-dev/vozbit/releases) · [Reportar un problema](https://github.com/yordy-dev/vozbit/issues)
+  **Dicta en cualquier aplicación de Windows y recibe texto listo para usar.**
 
-## Funciones
+  [![Versión](https://img.shields.io/github/v/release/yordy-dev/vozbit?display_name=tag&style=flat-square&color=35b75a)](https://github.com/yordy-dev/vozbit/releases/latest)
+  ![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011-1676d2?style=flat-square)
+  ![Procesamiento local](https://img.shields.io/badge/transcripción-local-238636?style=flat-square)
 
-- Transcripción local con **Whisper base** o **Parakeet Ultra**; puedes elegir el motor y el micrófono en la app.
-- Atajo global configurable para iniciar y terminar un dictado. El atajo predeterminado es `Ctrl+Shift+Space`.
-- Entrega del texto al campo activo, con opción de revisar o copiar el resultado desde Inicio.
-- Historial local, diccionario personal y aprendizaje opcional de correcciones.
-- Ventana compacta de estado y acceso desde la bandeja del sistema.
+  [**Descargar Vozbit**](https://github.com/yordy-dev/vozbit/releases/latest) · [Ver todas las versiones](https://github.com/yordy-dev/vozbit/releases) · [Reportar un problema](https://github.com/yordy-dev/vozbit/issues/new)
+</div>
 
-La transcripción puede equivocarse, especialmente con nombres, ruido o fórmulas. Revisa el resultado antes de usarlo en contextos importantes.
+![Demostración breve de Vozbit](docs/media/vozbit-demo.gif)
 
-## Instalar y empezar
+<div align="center">
+  <a href="docs/media/vozbit-demo.mp4">Ver la demostración en video</a>
+</div>
 
-1. Descarga `Vozbit_<versión>_x64-setup.exe` desde [Releases](https://github.com/yordy-dev/vozbit/releases/latest) y ejecuta el instalador.
-2. Abre Vozbit y selecciona el micrófono y el motor de transcripción.
-3. Coloca el cursor en el campo donde quieres escribir.
-4. Usa el atajo configurado. Al finalizar el dictado, Vozbit procesa el audio y entrega el texto según el modo de salida elegido.
+## ¿Qué es Vozbit?
 
-El instalador incluye los motores, modelos locales y el instalador offline de WebView2. No se necesita conexión para instalar; descargar el instalador sí requiere Internet.
+Vozbit es una aplicación de dictado local para Windows. Convierte tu voz en texto y lo entrega en el campo donde estás escribiendo: chats, documentos, formularios o editores de código. No requiere una cuenta y los motores de transcripción se ejecutan en tu equipo.
+
+## ¿Para qué puedes usarlo?
+
+- **Mensajes y documentos:** dicta párrafos sin cambiar de aplicación.
+- **Código y contenido técnico:** usa el diccionario personal para nombres, comandos y términos frecuentes.
+- **Apuntes y trabajo diario:** recupera dictados anteriores desde el historial local.
+- **Ecuaciones y números:** activa el formato de números y símbolos matemáticos para expresiones dictadas.
+- **Palabras propias:** enseña correcciones manualmente o permite que Vozbit detecte cambios claros después de un dictado.
+
+## Así se ve Vozbit
+
+| Inicio compacto | Indicador durante el dictado |
+| --- | --- |
+| ![Pantalla principal compacta de Vozbit](docs/images/01-inicio.png) | ![Indicador de grabación y procesamiento de Vozbit](docs/media/vozbit-indicator-demo.gif) |
+| **Diccionario personal** | **Configuración organizada** |
+| ![Diccionario personal de Vozbit](docs/images/03-diccionario.png) | ![Configuración de Vozbit](docs/images/04-configuracion.png) |
+
+## Cómo se usa
+
+1. **Coloca el cursor.** Haz clic en el campo donde quieres recibir el texto.
+2. **Activa el dictado.** Pulsa `Ctrl + Shift + Space` o el atajo que hayas configurado.
+3. **Habla con normalidad.** El indicador verde confirma que Vozbit está escuchando.
+4. **Finaliza el dictado.** Vuelve a usar el atajo; la onda naranja muestra el procesamiento local.
+5. **Recibe el texto.** Vozbit intenta entregarlo en el campo activo y conserva el resultado en Inicio si Windows no permite confirmar el destino.
+
+## Ventajas
+
+| Ventaja | Qué significa para ti |
+| --- | --- |
+| Transcripción local | El audio se procesa en tu computadora con Parakeet Ultra o Whisper base. |
+| Sin cuenta | Puedes instalar y usar Vozbit sin registro. |
+| Uso global | El atajo funciona mientras trabajas en otras aplicaciones compatibles. |
+| Interfaz compacta | La ventana principal ocupa poco espacio y Configuración se amplía solo cuando la necesitas. |
+| Recuperación | El último resultado y el historial local permiten recuperar texto si la entrega falla. |
+| Diccionario personal | Puedes guardar términos propios y revisar correcciones aprendidas. |
+
+## Funciones principales
+
+### Dictado y entrega
+
+- Atajo global configurable, con modo pulsar o mantener presionado.
+- Selección de micrófono e idioma desde la aplicación.
+- Entrega al campo de texto activo mediante funciones locales de Windows.
+- Indicador flotante para grabación, procesamiento, finalización y errores.
+- Reprocesamiento del último audio y copia manual desde Inicio.
+
+### Transcripción y formato
+
+- Parakeet Ultra y Whisper base como motores locales seleccionables.
+- Detección de voz con Silero VAD.
+- Corrección de texto, espacio final y formato de números configurables.
+- Conversión opcional de expresiones matemáticas dictadas a símbolos.
+
+### Historial y diccionario
+
+- Historial local con búsqueda, favoritos y límite configurable.
+- Diccionario de términos y reemplazos personalizados.
+- Aprendizaje opcional de correcciones realizadas después del dictado.
+- Revisión de sugerencias ambiguas antes de convertirlas en reglas permanentes.
+
+## Descargar y empezar
+
+1. Descarga la [versión más reciente](https://github.com/yordy-dev/vozbit/releases/latest).
+2. Ejecuta `Vozbit_0.5.8_x64-setup.exe`.
+3. Abre Vozbit y completa el tutorial inicial.
+4. Elige el micrófono y el motor local en **Configuración**.
+5. Coloca el cursor en un campo de texto y pulsa `Ctrl + Shift + Space`.
+
+> [!NOTE]
+> El instalador incluye los motores, los modelos locales y WebView2 para funcionar sin descargas adicionales durante la instalación. Por eso el archivo ocupa aproximadamente 1 GB.
+
+> [!WARNING]
+> El instalador actual no tiene firma digital. Windows puede mostrar una advertencia de editor desconocido. Descárgalo únicamente desde este repositorio y compara su SHA-256 con [`SHA256SUMS-v0.5.8.txt`](SHA256SUMS-v0.5.8.txt).
+
+## Requisitos y compatibilidad
+
+- Windows 10 u 11 de 64 bits.
+- Micrófono reconocido por Windows.
+- Aproximadamente 2 GB libres para la instalación y los archivos temporales.
+- Más memoria y CPU disponibles mejoran la velocidad de los modelos locales.
+
+Vozbit no ofrece actualmente versiones para macOS o Linux.
 
 ## Privacidad
 
-- Whisper y Parakeet procesan el audio localmente; el dictado no se envía a un servicio remoto de transcripción.
-- El historial guarda texto en el equipo y se puede desactivar en Configuración. El audio no se conserva en el historial.
-- El aprendizaje de correcciones está desactivado hasta que lo actives. Si lo habilitas, Vozbit observa durante un período limitado el campo editable de destino para reconocer correcciones; no observa campos de contraseña.
-- El envío al campo activo usa funciones locales de Windows. Si no puede confirmar el destino, conserva el resultado en Inicio para que puedas revisarlo y copiarlo.
+Vozbit no requiere una cuenta. Whisper y Parakeet procesan el audio localmente y el audio temporal se elimina al terminar. El historial guarda texto en el equipo y puede desactivarse. El aprendizaje de correcciones también es opcional y no observa campos de contraseña.
 
-## Compilar desde el código
+<details>
+<summary><strong>Desarrollo local</strong></summary>
+
+### Preparación
 
 Se requieren Node.js, Rust y los prerrequisitos de escritorio de Tauri para Windows.
 
-Desde la raíz del repositorio, descarga y verifica los modelos grandes:
+Descarga y verifica los modelos fijados para el proyecto:
 
 ```powershell
 .\scripts\fetch-models.ps1
 ```
 
-Después compila el instalador:
+Instala las dependencias y ejecuta el frontend:
 
 ```powershell
 cd app
 npm ci
+npm run dev
+```
+
+### Compilación
+
+```powershell
+cd app
+npm run build
 npm run tauri -- build --bundles nsis
 ```
 
-Los modelos de Whisper y Parakeet se distribuyen como assets de [Releases](https://github.com/yordy-dev/vozbit/releases), no en el historial de Git. `scripts/fetch-models.ps1` descarga las versiones fijadas y comprueba sus hashes SHA-256.
+Los modelos grandes se distribuyen como recursos de las [Releases](https://github.com/yordy-dev/vozbit/releases). `fetch-models.ps1` descarga las versiones fijadas y comprueba sus hashes SHA-256.
+
+### Recursos del README
+
+- Capturas: `docs/images/`
+- GIF y videos: `docs/media/`
+
+</details>
 
 ## Solución de problemas
 
 - **No se oye el dictado:** revisa el micrófono elegido y los permisos de micrófono de Windows.
-- **El atajo no responde:** verifica el atajo en Configuración y que otra app no esté usando la misma combinación.
-- **El texto no aparece en el campo:** revisa el modo de entrega; el resultado permanece disponible en Inicio para copiarlo manualmente.
-- **La descarga del modelo falla:** vuelve a ejecutar `fetch-models.ps1` con conexión a Internet; el script verifica el archivo antes de guardarlo.
+- **El atajo no responde:** comprueba que otra aplicación no use la misma combinación.
+- **El texto no aparece en el campo:** revisa el modo de entrega; el resultado permanece disponible en Inicio para copiarlo.
+- **El motor local no está listo:** vuelve a comprobar sus archivos desde Configuración o ejecuta `fetch-models.ps1` al compilar desde el código.
+- **La transcripción tarda:** Parakeet Ultra prioriza precisión y puede necesitar más tiempo en equipos con menos CPU o memoria disponible.
+
+## Ayuda y contribución
+
+Si encuentras un error, [abre una incidencia](https://github.com/yordy-dev/vozbit/issues/new) e incluye:
+
+- Versión de Vozbit y de Windows.
+- Motor de transcripción seleccionado.
+- Pasos exactos para reproducir el problema.
+- Resultado esperado y resultado obtenido.
+- Captura o video, siempre que no exponga información privada.
 
 ## Componentes y licencia
 
-Los motores y modelos de terceros conservan sus propias licencias y atribuciones, incluidas en `app/src-tauri/resources/THIRD_PARTY_LICENSES.txt` y en los recursos correspondientes. **La licencia de reutilización del código de Vozbit aún no está definida**; el repositorio es público, pero no concede por sí solo permiso para reutilizar el código.
+Los motores y modelos de terceros conservan sus propias licencias y atribuciones, incluidas en `app/src-tauri/resources/THIRD_PARTY_LICENSES.txt` y en los recursos correspondientes. El código de Vozbit está visible públicamente, pero todavía no tiene una licencia general de reutilización.
