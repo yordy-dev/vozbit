@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { createDataBackup, exportDiagnostics, runDiagnostics } from "./api";
 import { VoiceTextMark } from "./Icons";
-import type { AppSettings, AudioDevice, AudioTestResult, DictationResult, ModelStatus, ShortcutStatus } from "./types";
+import type { AppSettings, AudioDevice, AudioTestResult, DiagnosticReport, DictationResult, ModelStatus, ShortcutStatus } from "./types";
 import "./settings.css";
 
 type Category = "general" | "model" | "output" | "appearance" | "data" | "help";
@@ -45,6 +46,7 @@ export function SettingsPanel(p: Props) {
   const [busy, setBusy] = useState(false);
   const [hasAudio, setHasAudio] = useState(false);
   const [opacityDraft, setOpacityDraft] = useState(p.settings.overlay_opacity);
+  const [diagnostics, setDiagnostics] = useState<DiagnosticReport | null>(null);
   const busyRef = useRef(false);
   const contentRef = useRef<HTMLDivElement>(null);
   const whisperReady = Boolean(p.model?.available && p.model.sha256_ok && p.model.engine_available && p.model.vad_sha256_ok);
@@ -84,6 +86,17 @@ export function SettingsPanel(p: Props) {
   const patch = (value: Partial<AppSettings>) => void action(() => p.onPatch(value));
   const toggle = (key: keyof AppSettings, label: string) => <button type="button" role="switch" className="switch" aria-label={label} aria-checked={Boolean(p.settings[key])} disabled={busy} onClick={() => patch({ [key]: !p.settings[key] })}><span /></button>;
   const selectCategory = (next: Category) => { setCategory(next); setMessage(""); setFailed(false); };
+
+  async function diagnose() {
+    await action(async () => {
+      const report = await runDiagnostics();
+      setDiagnostics(report);
+      const failures = report.checks.filter(item => item.status === "error").length;
+      const warnings = report.checks.filter(item => item.status === "warning").length;
+      if (failures > 0) return `Diagnóstico completado con ${failures} problema${failures === 1 ? "" : "s"}.`;
+      return warnings > 0 ? `Diagnóstico completado con ${warnings} aviso${warnings === 1 ? "" : "s"}.` : "Diagnóstico completado: recursos locales disponibles.";
+    });
+  }
 
   return <div className="vt-settings-layout">
     <aside className="vt-settings-sidebar" aria-label="Categorías de configuración">
@@ -153,16 +166,23 @@ export function SettingsPanel(p: Props) {
           <Row title="Iniciar con Windows">{toggle("launch_at_startup", "Iniciar con Windows")}</Row>
         </div>
         <h2 className="vt-settings-group-label">HISTORIAL</h2><div className="surface settings-card">
-          <Row title="Guardar transcripciones" hint="Solo en este equipo.">{toggle("auto_save", "Guardar transcripciones")}</Row>
+          <Row title="Modo privado" hint="No guarda historial, no aprende correcciones y no conserva el último audio para reprocesarlo.">{toggle("private_mode", "Modo privado")}</Row>
+          <Row title="Guardar transcripciones" hint={p.settings.private_mode ? "Pausado mientras el modo privado esté activo." : "Solo en este equipo."}>{toggle("auto_save", "Guardar transcripciones")}</Row>
           <Row title="Entradas recientes" hint="Los favoritos se conservan aparte."><select disabled={busy} aria-label="Límite de historial" value={p.settings.history_limit} onChange={event => patch({ history_limit: Number(event.target.value) })}>{[20, 50, 100, 250, 500].map(value => <option key={value} value={value}>{value}</option>)}</select></Row>
-          <Row title="Reprocesar último audio" hint="Disponible solo durante esta sesión. No vuelve a insertar en otra app."><button className="soft-button" type="button" disabled={!hasAudio || busy} onClick={() => void action(p.onReprocess, "Reprocesado")}>Reprocesar</button></Row>
+          <Row title="Reprocesar último audio" hint={p.settings.private_mode ? "No disponible en modo privado." : "Disponible solo durante esta sesión. No vuelve a insertar en otra app."}><button className="soft-button" type="button" disabled={!hasAudio || busy || p.settings.private_mode} onClick={() => void action(p.onReprocess, "Reprocesado")}>Reprocesar</button></Row>
+        </div>
+        <h2 className="vt-settings-group-label">RESPALDO</h2><div className="surface settings-card">
+          <Row title="Crear respaldo local" hint="Guarda configuración, historial y diccionario en la carpeta local de Vozbit. El archivo puede contener texto sensible."><button className="soft-button" type="button" disabled={busy} onClick={() => void action(async () => { const backup = await createDataBackup(); return `Respaldo creado: ${backup.history_entries} textos y ${backup.dictionary_entries} reglas · ${backup.path}`; })}>Crear respaldo</button></Row>
         </div>
         <details className="settings-extra"><summary>Diagnóstico local <span>Avanzado</span></summary><div className="surface settings-card" aria-label="Diagnóstico local sin contenido del dictado">
           <Row title="Atajo global"><span className="diagnostic-value">{p.shortcut?.registered ? `Activo: ${p.shortcut.shortcut}` : "No registrado; cambia la combinación"}</span></Row>
           <Row title="Modelo y voz"><span className="diagnostic-value">{(p.settings.transcription_engine === "parakeet_ultra" ? parakeetReady : whisperReady) ? "Modelo y detector listos" : "Revisar modelo o detector"}</span></Row>
           <Row title="Último dictado" hint="Solo métricas de esta sesión; aquí no se muestra audio ni texto."><span className="diagnostic-value">{p.lastResult ? `${p.lastResult.captured_seconds.toFixed(1)} s de audio · ${(p.lastResult.post_release_ms / 1000).toFixed(1)} s desde soltar · ${(p.lastResult.transcript.inference_ms / 1000).toFixed(1)} s de motor · ${p.lastResult.prefetched_segments} fragmentos anticipados · ${p.lastResult.dropped_chunks} fragmentos perdidos` : "Sin dictados en esta sesión"}</span></Row>
+          <Row title="Almacenamiento y temporales" hint="No incluye audio ni texto dictado."><button className="soft-button" type="button" disabled={busy} onClick={() => void diagnose()}>Ejecutar diagnóstico</button></Row>
+          <Row title="Informe para soporte" hint="Guarda versión, recursos y códigos técnicos. Nunca incluye el audio ni el texto dictado."><button className="soft-button" type="button" disabled={busy} onClick={() => void action(async () => `Informe guardado: ${await exportDiagnostics()}`)}>Guardar informe</button></Row>
+          {diagnostics && <div className="diagnostic-report" role="status"><p>Vozbit {diagnostics.app_version} · {diagnostics.os_version} · {diagnostics.architecture} · {diagnostics.logical_processors} procesadores lógicos</p><p>{Math.round(diagnostics.available_memory_bytes / 1024 / 1024)} MiB de memoria disponibles · CPU: {diagnostics.cpu_features.join(", ") || "características estándar"}</p>{diagnostics.checks.map(item => <p key={item.id} className={item.status === "ok" ? "ready" : item.status === "warning" ? "warning" : "problem"}><strong>{item.status === "ok" ? "Correcto" : item.status === "warning" ? "Aviso" : "Revisar"}</strong> · {item.detail}</p>)}{diagnostics.stale_files_removed > 0 && <p>Se limpiaron {diagnostics.stale_files_removed} archivos temporales antiguos.</p>}</div>}
         </div></details>
-        <p className="vt-privacy-note">Todo permanece en este equipo. El último audio se conserva en memoria para reprocesarlo y desaparece al salir.</p>
+        <p className="vt-privacy-note">{p.settings.private_mode ? "Modo privado activo: no se guarda historial, aprendizaje ni audio para reprocesar." : "Todo permanece en este equipo. El último audio se conserva en memoria para reprocesarlo y desaparece al salir."}</p>
       </section>
 
       <section className="vt-settings-page" hidden={category !== "help"}>

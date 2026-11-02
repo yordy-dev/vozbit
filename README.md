@@ -77,14 +77,16 @@ Vozbit es una aplicación de dictado local para Windows. Convierte tu voz en tex
 ### Historial y diccionario
 
 - Historial local con búsqueda, favoritos y límite configurable.
+- Modo privado para dictar sin historial, aprendizaje ni audio disponible para reprocesar.
 - Diccionario de términos y reemplazos personalizados.
 - Aprendizaje opcional de correcciones realizadas después del dictado.
 - Revisión de sugerencias ambiguas antes de convertirlas en reglas permanentes.
+- Respaldo local y diagnóstico exportable sin incluir audio ni texto dictado.
 
 ## Descargar y empezar
 
 1. Descarga la [versión más reciente](https://github.com/yordy-dev/vozbit/releases/latest).
-2. Ejecuta `Vozbit_0.5.8_x64-setup.exe`.
+2. Ejecuta `Vozbit_0.5.9_x64-setup.exe`.
 3. Abre Vozbit y completa el tutorial inicial.
 4. Elige el micrófono y el motor local en **Configuración**.
 5. Coloca el cursor en un campo de texto y pulsa `Ctrl + Shift + Space`.
@@ -93,7 +95,7 @@ Vozbit es una aplicación de dictado local para Windows. Convierte tu voz en tex
 > El instalador incluye los motores, los modelos locales y WebView2 para funcionar sin descargas adicionales durante la instalación. Por eso el archivo ocupa aproximadamente 1 GB.
 
 > [!WARNING]
-> El instalador actual no tiene firma digital. Windows puede mostrar una advertencia de editor desconocido. Descárgalo únicamente desde este repositorio y compara su SHA-256 con [`SHA256SUMS-v0.5.8.txt`](SHA256SUMS-v0.5.8.txt).
+> El instalador actual no tiene firma digital. Windows puede mostrar una advertencia de editor desconocido. Descárgalo únicamente desde este repositorio y compara su SHA-256 con [`SHA256SUMS-v0.5.9.txt`](SHA256SUMS-v0.5.9.txt).
 
 ## Requisitos y compatibilidad
 
@@ -106,7 +108,7 @@ Vozbit no ofrece actualmente versiones para macOS o Linux.
 
 ## Privacidad
 
-Vozbit no requiere una cuenta. Whisper y Parakeet procesan el audio localmente y el audio temporal se elimina al terminar. El historial guarda texto en el equipo y puede desactivarse. El aprendizaje de correcciones también es opcional y no observa campos de contraseña.
+Vozbit no requiere una cuenta. Whisper y Parakeet procesan el audio localmente. El historial guarda texto en el equipo y puede desactivarse; el modo privado tampoco conserva historial, aprendizaje ni el último audio para reprocesar. El aprendizaje de correcciones es opcional y no observa campos de contraseña.
 
 <details>
 <summary><strong>Desarrollo local</strong></summary>

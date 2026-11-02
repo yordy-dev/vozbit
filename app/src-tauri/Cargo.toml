@@ -1,6 +1,6 @@
 [package]
 name = "voicetext-local"
-version = "0.5.8"
+version = "0.5.9"
 description = "Dictado local para Windows"
 authors = ["VoiceText Local"]
 edition = "2021"
@@ -27,5 +27,6 @@ tauri-plugin-autostart = "2"
 tauri-plugin-notification = "2"
 regex = "1.13"
 reqwest = { version = "=0.13.5", default-features = false, features = ["blocking", "multipart", "json"] }
+sysinfo = { version = "=0.39.6", default-features = false, features = ["system", "disk"] }
 windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_UI_Input_KeyboardAndMouse"] }
 windows = { version = "0.62.2", features = ["Win32_Foundation", "Win32_System_Com", "Win32_System_Ole", "Win32_UI_Accessibility"] }

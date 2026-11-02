@@ -31,38 +31,73 @@ pub struct ShortcutStatus {
 }
 
 pub fn register(app: &AppHandle) {
-    let _ = app.global_shortcut().on_shortcut("Ctrl+Alt+L", |app,_,event| {
-        if event.state == ShortcutState::Pressed {crate::learning::selected_word(app);}
-    });
+    let _ = app
+        .global_shortcut()
+        .on_shortcut("Ctrl+Alt+L", |app, _, event| {
+            if event.state == ShortcutState::Pressed {
+                crate::learning::selected_word(app);
+            }
+        });
     let handle = app.clone();
     std::thread::spawn(move || {
-        use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState,VK_CONTROL,VK_SHIFT,VK_MENU};
+        use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
+            GetAsyncKeyState, VK_CONTROL, VK_MENU, VK_SHIFT,
+        };
         let mut was_down = false;
         loop {
-            let enabled = handle.state::<ShortcutStatusState>().0.lock().map(|s|s.shortcut=="Ctrl+Shift").unwrap_or(false);
-            let down = enabled && unsafe { GetAsyncKeyState(VK_CONTROL as i32) } < 0 && unsafe { GetAsyncKeyState(VK_SHIFT as i32) } < 0 && unsafe { GetAsyncKeyState(VK_MENU as i32) } >= 0;
-            if down != was_down { let _ = handle.emit("shortcut://state",if down {"pressed"} else {"released"}); }
-            was_down=down;
+            let enabled = handle
+                .state::<ShortcutStatusState>()
+                .0
+                .lock()
+                .map(|s| s.shortcut == "Ctrl+Shift")
+                .unwrap_or(false);
+            let down = enabled
+                && unsafe { GetAsyncKeyState(VK_CONTROL as i32) } < 0
+                && unsafe { GetAsyncKeyState(VK_SHIFT as i32) } < 0
+                && unsafe { GetAsyncKeyState(VK_MENU as i32) } >= 0;
+            if down != was_down {
+                let _ = handle.emit(
+                    "shortcut://state",
+                    if down { "pressed" } else { "released" },
+                );
+            }
+            was_down = down;
             std::thread::sleep(std::time::Duration::from_millis(25));
         }
     });
-    let _ = app.global_shortcut().on_shortcut("Ctrl+Alt+Escape", |app,_,event| {
-        if event.state == ShortcutState::Pressed { crate::transcription::cancel(); let _=app.emit("shortcut://cancel",()); }
-    });
-    let _ = app.global_shortcut().on_shortcut("Ctrl+Alt+Space", |app,_,event| {
-        if event.state == ShortcutState::Pressed { let _=app.emit("shortcut://reprocess",()); }
-    });
+    let _ = app
+        .global_shortcut()
+        .on_shortcut("Ctrl+Alt+Escape", |app, _, event| {
+            if event.state == ShortcutState::Pressed {
+                crate::transcription::cancel();
+                let _ = app.emit("shortcut://cancel", ());
+            }
+        });
+    let _ = app
+        .global_shortcut()
+        .on_shortcut("Ctrl+Alt+Space", |app, _, event| {
+            if event.state == ShortcutState::Pressed {
+                let _ = app.emit("shortcut://reprocess", ());
+            }
+        });
     let saved = storage::read_setting(app, "shortcut")
         .ok()
         .flatten()
         .filter(|value| allowed(value))
         .unwrap_or_else(|| DEFAULT_SHORTCUT.into());
-    let result = if saved == "Ctrl+Shift" { Ok(()) } else { app
-        .global_shortcut()
-        .on_shortcut(saved.as_str(), |app, _shortcut, event| {
-            let state = if event.state == ShortcutState::Pressed { "pressed" } else { "released" };
-            let _ = app.emit("shortcut://state", state);
-        }) };
+    let result = if saved == "Ctrl+Shift" {
+        Ok(())
+    } else {
+        app.global_shortcut()
+            .on_shortcut(saved.as_str(), |app, _shortcut, event| {
+                let state = if event.state == ShortcutState::Pressed {
+                    "pressed"
+                } else {
+                    "released"
+                };
+                let _ = app.emit("shortcut://state", state);
+            })
+    };
     if let Ok(mut status) = app.state::<ShortcutStatusState>().0.lock() {
         status.shortcut = saved;
         status.error = result
@@ -72,7 +107,16 @@ pub fn register(app: &AppHandle) {
 }
 
 fn allowed(value: &str) -> bool {
-    value == "Ctrl+Shift" || (value.len() < 80 && value.contains('+') && !matches!(value,"Ctrl+Alt+Escape"|"Ctrl+Alt+Esc"|"Ctrl+Alt+Space"|"Ctrl+Alt+L") && value.parse::<tauri_plugin_global_shortcut::Shortcut>().is_ok())
+    value == "Ctrl+Shift"
+        || (value.len() < 80
+            && value.contains('+')
+            && !matches!(
+                value,
+                "Ctrl+Alt+Escape" | "Ctrl+Alt+Esc" | "Ctrl+Alt+Space" | "Ctrl+Alt+L"
+            )
+            && value
+                .parse::<tauri_plugin_global_shortcut::Shortcut>()
+                .is_ok())
 }
 
 #[tauri::command]
@@ -108,12 +152,18 @@ pub fn shortcut_update(
             error: None,
         });
     }
-    if shortcut != "Ctrl+Shift" { app.global_shortcut()
-        .on_shortcut(shortcut.as_str(), |app, _shortcut, event| {
-            let state = if event.state == ShortcutState::Pressed { "pressed" } else { "released" };
-            let _ = app.emit("shortcut://state", state);
-        })
-        .map_err(|error| format!("Windows no permitió usar ese atajo: {error}"))?; }
+    if shortcut != "Ctrl+Shift" {
+        app.global_shortcut()
+            .on_shortcut(shortcut.as_str(), |app, _shortcut, event| {
+                let state = if event.state == ShortcutState::Pressed {
+                    "pressed"
+                } else {
+                    "released"
+                };
+                let _ = app.emit("shortcut://state", state);
+            })
+            .map_err(|error| format!("Windows no permitió usar ese atajo: {error}"))?;
+    }
     if let Err(error) = storage::write_setting(&app, "shortcut", &shortcut) {
         let _ = app.global_shortcut().unregister(shortcut.as_str());
         return Err(error);

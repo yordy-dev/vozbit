@@ -35,6 +35,23 @@ pub struct DictionaryPreview {
 }
 
 #[derive(Serialize)]
+pub struct BackupResult {
+    path: String,
+    history_entries: usize,
+    dictionary_entries: usize,
+}
+
+#[derive(Serialize)]
+struct BackupPayload {
+    format: &'static str,
+    created_at_ms: i64,
+    settings: HashMap<String, String>,
+    history: Vec<HistoryItem>,
+    dictionary: Vec<DictionaryEntry>,
+    suggestions: Vec<(String, String)>,
+}
+
+#[derive(Serialize)]
 pub struct AppSettings {
     tutorial_version: u8,
     learn_corrections: bool,
@@ -43,6 +60,7 @@ pub struct AppSettings {
     preferred_device_id: String,
     auto_insert: bool,
     auto_save: bool,
+    private_mode: bool,
     append_trailing_space: bool,
     text_correction: bool,
     format_numbers: bool,
@@ -64,6 +82,7 @@ pub struct SettingsPatch {
     preferred_device_id: Option<String>,
     auto_insert: Option<bool>,
     auto_save: Option<bool>,
+    private_mode: Option<bool>,
     append_trailing_space: Option<bool>,
     text_correction: Option<bool>,
     format_numbers: Option<bool>,
@@ -76,7 +95,7 @@ pub struct SettingsPatch {
     history_limit: Option<i64>,
 }
 
-fn database_path(app: &AppHandle) -> Result<PathBuf, String> {
+pub(crate) fn database_path(app: &AppHandle) -> Result<PathBuf, String> {
     #[cfg(debug_assertions)]
     if let Some(folder) = std::env::var_os("VOICETEXT_DATA_DIR") {
         let path = PathBuf::from(folder);
@@ -169,7 +188,9 @@ pub async fn settings_get(app: AppHandle) -> Result<AppSettings, String> {
             preferred_device_id: read_setting(&app, "preferred_device_id")?.unwrap_or_default(),
             auto_insert: read_setting(&app, "auto_insert")?.as_deref() != Some("false"),
             auto_save: read_setting(&app, "auto_save")?.as_deref() != Some("false"),
-            append_trailing_space: read_setting(&app, "append_trailing_space")?.as_deref() != Some("false"),
+            private_mode: read_setting(&app, "private_mode")?.as_deref() == Some("true"),
+            append_trailing_space: read_setting(&app, "append_trailing_space")?.as_deref()
+                != Some("false"),
             text_correction: read_setting(&app, "text_correction")?.as_deref() != Some("false"),
             format_numbers: read_setting(&app, "format_numbers")?.as_deref() != Some("false"),
             math_symbols: read_setting(&app, "math_symbols")?.as_deref() != Some("false"),
@@ -218,7 +239,10 @@ pub async fn settings_patch(app: AppHandle, patch: SettingsPatch) -> Result<(), 
             return Err("La posición del indicador no es válida".into());
         }
     }
-    if patch.overlay_opacity.is_some_and(|value| !(40..=100).contains(&value)) {
+    if patch
+        .overlay_opacity
+        .is_some_and(|value| !(40..=100).contains(&value))
+    {
         return Err("La transparencia del indicador debe estar entre 40 % y 100 %".into());
     }
     if let Some(limit) = patch.history_limit {
@@ -229,9 +253,13 @@ pub async fn settings_patch(app: AppHandle, patch: SettingsPatch) -> Result<(), 
     if let Some(enabled) = patch.launch_at_startup {
         use tauri_plugin_autostart::ManagerExt;
         if enabled {
-            app.autolaunch().enable().map_err(|error| format!("No se pudo activar el inicio con Windows: {error}"))?;
+            app.autolaunch()
+                .enable()
+                .map_err(|error| format!("No se pudo activar el inicio con Windows: {error}"))?;
         } else {
-            app.autolaunch().disable().map_err(|error| format!("No se pudo desactivar el inicio con Windows: {error}"))?;
+            app.autolaunch()
+                .disable()
+                .map_err(|error| format!("No se pudo desactivar el inicio con Windows: {error}"))?;
         }
     }
     let opacity_change = patch.overlay_opacity;
@@ -261,6 +289,10 @@ pub async fn settings_patch(app: AppHandle, patch: SettingsPatch) -> Result<(), 
         }
         if let Some(enabled) = patch.auto_save {
             write_setting(&app, "auto_save", if enabled { "true" } else { "false" })?;
+        }
+        if let Some(enabled) = patch.private_mode {
+            write_setting(&app, "private_mode", if enabled { "true" } else { "false" })?;
+            if enabled { crate::learning::stop(); }
         }
         if let Some(enabled) = patch.append_trailing_space {
             write_setting(&app, "append_trailing_space", if enabled { "true" } else { "false" })?;
@@ -313,6 +345,9 @@ pub async fn history_save(
     language: String,
     audio_seconds: f64,
 ) -> Result<i64, String> {
+    if read_setting(&app, "private_mode")?.as_deref() == Some("true") {
+        return Err("El modo privado está activo; esta transcripción no se guardará".into());
+    }
     if text.trim().is_empty() || text.len() > 100_000 {
         return Err("El texto debe tener entre 1 y 100 000 caracteres".into());
     }
@@ -352,6 +387,84 @@ pub async fn history_save(
     })
     .await
     .map_err(|error| format!("El guardado terminó inesperadamente: {error}"))?
+}
+
+pub(crate) fn database_quick_check(app: &AppHandle) -> Result<(), String> {
+    let connection = open(app)?;
+    let result: String = connection
+        .query_row("PRAGMA quick_check(1)", [], |row| row.get(0))
+        .map_err(|error| format!("No se pudo comprobar la base local: {error}"))?;
+    if result.eq_ignore_ascii_case("ok") {
+        Ok(())
+    } else {
+        Err(format!("La base local informó un problema: {result}"))
+    }
+}
+
+#[tauri::command]
+pub async fn history_clear(app: AppHandle, include_favorites: bool) -> Result<usize, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let connection = open(&app)?;
+        let sql = if include_favorites {
+            "DELETE FROM history"
+        } else {
+            "DELETE FROM history WHERE favorite=0"
+        };
+        connection
+            .execute(sql, [])
+            .map_err(|error| format!("No se pudo limpiar el historial: {error}"))
+    })
+    .await
+    .map_err(|error| format!("La limpieza terminó inesperadamente: {error}"))?
+}
+
+#[tauri::command]
+pub async fn data_backup_create(app: AppHandle) -> Result<BackupResult, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        database_quick_check(&app)?;
+        let connection = open(&app)?;
+        let mut history_statement = connection.prepare(
+            "SELECT id,created_at_ms,text,language,audio_seconds,favorite FROM history ORDER BY created_at_ms DESC,id DESC"
+        ).map_err(|error| error.to_string())?;
+        let history = history_statement.query_map([], |row| Ok(HistoryItem {
+            id: row.get(0)?, created_at_ms: row.get(1)?, text: row.get(2)?, language: row.get(3)?,
+            audio_seconds: row.get(4)?, favorite: row.get::<_, i64>(5)? != 0,
+        })).map_err(|error| error.to_string())?
+            .collect::<Result<Vec<_>, _>>().map_err(|error| error.to_string())?;
+        let dictionary = read_dictionary(&connection)?;
+        let settings = {
+            let mut statement = connection.prepare("SELECT key,value FROM settings ORDER BY key")
+                .map_err(|error| error.to_string())?;
+            let collected = statement.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+                .map_err(|error| error.to_string())?
+                .collect::<Result<HashMap<_, _>, _>>().map_err(|error| error.to_string())?;
+            collected
+        };
+        let suggestions = {
+            let mut statement = connection.prepare("SELECT term,replacement FROM suggestions ORDER BY rowid")
+                .map_err(|error| error.to_string())?;
+            let collected = statement.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+                .map_err(|error| error.to_string())?
+                .collect::<Result<Vec<_>, _>>().map_err(|error| error.to_string())?;
+            collected
+        };
+        let created_at_ms = SystemTime::now().duration_since(UNIX_EPOCH)
+            .map_err(|error| error.to_string())?.as_millis() as i64;
+        let payload = BackupPayload {
+            format: "vozbit-backup-v1", created_at_ms, settings, history,
+            dictionary, suggestions,
+        };
+        let directory = database_path(&app)?.parent().ok_or("Ruta de datos inválida")?.join("backups");
+        fs::create_dir_all(&directory).map_err(|error| format!("No se pudo crear la carpeta de respaldos: {error}"))?;
+        let path = directory.join(format!("vozbit-backup-{created_at_ms}.json"));
+        let bytes = serde_json::to_vec_pretty(&payload).map_err(|error| format!("No se pudo preparar el respaldo: {error}"))?;
+        fs::write(&path, bytes).map_err(|error| format!("No se pudo escribir el respaldo: {error}"))?;
+        Ok(BackupResult {
+            path: path.to_string_lossy().into_owned(),
+            history_entries: payload.history.len(),
+            dictionary_entries: payload.dictionary.len(),
+        })
+    }).await.map_err(|error| format!("El respaldo terminó inesperadamente: {error}"))?
 }
 
 #[tauri::command]
@@ -428,7 +541,7 @@ fn read_dictionary(connection: &Connection) -> Result<Vec<DictionaryEntry>, Stri
                 term: row.get(0)?,
                 replacement: row.get(1)?,
                 source: row.get(2)?,
-                enabled: row.get::<_,i64>(3)? != 0,
+                enabled: row.get::<_, i64>(3)? != 0,
             })
         })
         .map_err(|error| error.to_string())?;
@@ -442,7 +555,9 @@ pub(crate) fn dictionary_prompt_terms(app: &AppHandle) -> Result<Vec<String>, St
     let mut terms = Vec::new();
     let mut length = 0_usize;
     for entry in entries {
-        if !entry.enabled { continue; }
+        if !entry.enabled {
+            continue;
+        }
         let candidate = entry.replacement.trim();
         if !is_vocabulary_prompt_term(candidate) || length + candidate.len() > 500 {
             continue;
@@ -454,8 +569,11 @@ pub(crate) fn dictionary_prompt_terms(app: &AppHandle) -> Result<Vec<String>, St
 }
 
 fn is_vocabulary_prompt_term(term: &str) -> bool {
-    !term.is_empty() && term.chars().count() <= 40
-        && term.chars().all(|character| character.is_alphabetic() || character.is_whitespace() || character == '-')
+    !term.is_empty()
+        && term.chars().count() <= 40
+        && term.chars().all(|character| {
+            character.is_alphabetic() || character.is_whitespace() || character == '-'
+        })
 }
 
 #[tauri::command]
@@ -513,7 +631,9 @@ pub async fn dictionary_delete(app: AppHandle, term: String) -> Result<(), Strin
         if count == 0 {
             return Err("El término ya no existe".into());
         }
-        connection.execute("DELETE FROM dictionary_meta WHERE term=?1",[&term]).map_err(|e|e.to_string())?;
+        connection
+            .execute("DELETE FROM dictionary_meta WHERE term=?1", [&term])
+            .map_err(|e| e.to_string())?;
         Ok(())
     })
     .await
@@ -527,8 +647,13 @@ fn apply_entries(entries: &[DictionaryEntry], text: &str) -> Result<DictionaryPr
             changes: 0,
         });
     }
-    let mut ordered = entries.iter().filter(|e|e.enabled).collect::<Vec<_>>();
-    if ordered.is_empty() { return Ok(DictionaryPreview{text:text.to_string(),changes:0}); }
+    let mut ordered = entries.iter().filter(|e| e.enabled).collect::<Vec<_>>();
+    if ordered.is_empty() {
+        return Ok(DictionaryPreview {
+            text: text.to_string(),
+            changes: 0,
+        });
+    }
     ordered.sort_by_key(|entry| std::cmp::Reverse(entry.term.chars().count()));
     let terms = ordered
         .into_iter()
@@ -548,12 +673,18 @@ fn apply_entries(entries: &[DictionaryEntry], text: &str) -> Result<DictionaryPr
         let found = captures.get(0).unwrap();
         let left = text[..found.start()].chars().next_back();
         let right = text[found.end()..].chars().next();
-        if left.is_some_and(|c| c.is_alphanumeric() || c=='_') || right.is_some_and(|c| c.is_alphanumeric() || c=='_') { return found.as_str().to_string(); }
+        if left.is_some_and(|c| c.is_alphanumeric() || c == '_')
+            || right.is_some_and(|c| c.is_alphanumeric() || c == '_')
+        {
+            return found.as_str().to_string();
+        }
         let replacement = replacements
             .get(&captures[0].to_lowercase())
             .cloned()
             .unwrap_or_else(|| captures[0].to_string());
-        if replacement != found.as_str() { changes += 1; }
+        if replacement != found.as_str() {
+            changes += 1;
+        }
         replacement
     });
     Ok(DictionaryPreview {
@@ -568,24 +699,45 @@ pub(crate) fn apply_dictionary(app: &AppHandle, text: &str) -> Result<Dictionary
     apply_entries(&entries, text)
 }
 
-fn clear_single_word_correction(term:&str,replacement:&str)->bool {
+fn clear_single_word_correction(term: &str, replacement: &str) -> bool {
     let old_len = term.chars().count();
     let new_len = replacement.chars().count();
-    if !(3..=32).contains(&old_len) || !(3..=32).contains(&new_len)
+    if !(3..=32).contains(&old_len)
+        || !(3..=32).contains(&new_len)
         || !term.chars().all(char::is_alphabetic)
         || !replacement.chars().all(char::is_alphabetic)
-        || term == replacement { return false; }
-    if replacement.chars().all(|character| !character.is_lowercase())
-        || replacement.chars().skip(1).any(char::is_uppercase) { return true; }
+        || term == replacement
+    {
+        return false;
+    }
+    if replacement
+        .chars()
+        .all(|character| !character.is_lowercase())
+        || replacement.chars().skip(1).any(char::is_uppercase)
+    {
+        return true;
+    }
 
     // Only an edit of the freshly dictated word can reach this function. Do not
     // turn short words or ordinary singular/plural edits into global rules.
-    if old_len < 6 || new_len < 6 { return false; }
+    if old_len < 6 || new_len < 6 {
+        return false;
+    }
     let old = term.to_lowercase();
     let new = replacement.to_lowercase();
-    let shared_prefix = old.chars().zip(new.chars()).take_while(|(a,b)| a == b).count();
-    if old == new || shared_prefix < 3 || old.starts_with(&new) || new.starts_with(&old)
-        || (old_len == new_len && shared_prefix >= old_len.saturating_sub(2)) { return false; }
+    let shared_prefix = old
+        .chars()
+        .zip(new.chars())
+        .take_while(|(a, b)| a == b)
+        .count();
+    if old == new
+        || shared_prefix < 3
+        || old.starts_with(&new)
+        || new.starts_with(&old)
+        || (old_len == new_len && shared_prefix >= old_len.saturating_sub(2))
+    {
+        return false;
+    }
     let old_chars: Vec<char> = old.chars().collect();
     let new_chars: Vec<char> = new.chars().collect();
     let mut previous: Vec<usize> = (0..=new_chars.len()).collect();
@@ -605,54 +757,87 @@ fn clear_single_word_correction(term:&str,replacement:&str)->bool {
 fn reviewable_correction(term: &str, replacement: &str) -> bool {
     let term = term.trim();
     let replacement = replacement.trim();
-    if term.is_empty() || replacement.is_empty() || term == replacement
-        || term.chars().count() > 80 || replacement.chars().count() > 80
-        || term.chars().any(char::is_control) || replacement.chars().any(char::is_control)
+    if term.is_empty()
+        || replacement.is_empty()
+        || term == replacement
+        || term.chars().count() > 80
+        || replacement.chars().count() > 80
+        || term.chars().any(char::is_control)
+        || replacement.chars().any(char::is_control)
         || [term, replacement].iter().any(|value| {
-            value.contains('@') || value.contains('\\') || value.contains("://")
-                || value.as_bytes().windows(6).any(|digits| digits.iter().all(u8::is_ascii_digit))
-        }) {
+            value.contains('@')
+                || value.contains('\\')
+                || value.contains("://")
+                || value
+                    .as_bytes()
+                    .windows(6)
+                    .any(|digits| digits.iter().all(u8::is_ascii_digit))
+        })
+    {
         return false;
     }
     // A change to a number without nearby words would be a dangerous global rule.
-    if [term, replacement].iter().any(|value| value.chars().any(|c| c.is_ascii_digit())) {
+    if [term, replacement]
+        .iter()
+        .any(|value| value.chars().any(|c| c.is_ascii_digit()))
+    {
         return [term, replacement].iter().all(|value| {
-            value.split_whitespace().count() >= 3
-                && value.chars().any(char::is_alphabetic)
+            value.split_whitespace().count() >= 3 && value.chars().any(char::is_alphabetic)
         });
     }
     true
 }
 
-pub(crate) fn save_suggestion(app:&AppHandle,term:&str,replacement:&str)->Result<bool,String>{
-    let mut db=open(app)?;
-    save_suggestion_in_connection(&mut db,term,replacement)
+pub(crate) fn save_suggestion(
+    app: &AppHandle,
+    term: &str,
+    replacement: &str,
+) -> Result<bool, String> {
+    let mut db = open(app)?;
+    save_suggestion_in_connection(&mut db, term, replacement)
 }
 
-fn save_suggestion_in_connection(db:&mut Connection,term:&str,replacement:&str)->Result<bool,String>{
-    if !reviewable_correction(term,replacement) {return Err("Corrección inválida o sin contexto suficiente".into())}
-    let count:i64=db.query_row("SELECT count(*) FROM dictionary",[],|r|r.get(0)).map_err(|e|e.to_string())?;
-    let single_words = clear_single_word_correction(term,replacement);
+fn save_suggestion_in_connection(
+    db: &mut Connection,
+    term: &str,
+    replacement: &str,
+) -> Result<bool, String> {
+    if !reviewable_correction(term, replacement) {
+        return Err("Corrección inválida o sin contexto suficiente".into());
+    }
+    let count: i64 = db
+        .query_row("SELECT count(*) FROM dictionary", [], |r| r.get(0))
+        .map_err(|e| e.to_string())?;
+    let single_words = clear_single_word_correction(term, replacement);
     let protected_rule:bool=db.query_row("SELECT coalesce(m.source,'manual')='manual' OR coalesce(m.enabled,1)=0 FROM dictionary d LEFT JOIN dictionary_meta m ON m.term=d.term WHERE d.term=?1",[term],|r|r.get(0)).optional().map_err(|e|e.to_string())?.unwrap_or(false);
-    if single_words && !protected_rule && count<500 {
-        let tx=db.transaction().map_err(|e|e.to_string())?;
+    if single_words && !protected_rule && count < 500 {
+        let tx = db.transaction().map_err(|e| e.to_string())?;
         tx.execute("INSERT INTO dictionary(term,replacement) VALUES(?1,?2) ON CONFLICT(term) DO UPDATE SET replacement=excluded.replacement",params![term,replacement]).map_err(|e|e.to_string())?;
         tx.execute("INSERT INTO dictionary_meta(term,source,enabled) VALUES(?1,'learned',1) ON CONFLICT(term) DO UPDATE SET source='learned',enabled=1",[term]).map_err(|e|e.to_string())?;
-        tx.execute("DELETE FROM suggestions WHERE term=?1",[term]).map_err(|e|e.to_string())?;
-        tx.commit().map_err(|e|e.to_string())?;
+        tx.execute("DELETE FROM suggestions WHERE term=?1", [term])
+            .map_err(|e| e.to_string())?;
+        tx.commit().map_err(|e| e.to_string())?;
         return Ok(true);
     }
-    let tx=db.transaction().map_err(|e|e.to_string())?;
-    tx.execute("DELETE FROM suggestions WHERE term=?1",[term]).map_err(|e|e.to_string())?;
-    tx.execute("INSERT INTO suggestions(term,replacement) VALUES(?1,?2)",params![term,replacement]).map_err(|e|e.to_string())?;
+    let tx = db.transaction().map_err(|e| e.to_string())?;
+    tx.execute("DELETE FROM suggestions WHERE term=?1", [term])
+        .map_err(|e| e.to_string())?;
+    tx.execute(
+        "INSERT INTO suggestions(term,replacement) VALUES(?1,?2)",
+        params![term, replacement],
+    )
+    .map_err(|e| e.to_string())?;
     tx.execute("DELETE FROM suggestions WHERE rowid NOT IN (SELECT rowid FROM suggestions ORDER BY rowid DESC LIMIT 100)",[]).map_err(|e|e.to_string())?;
-    tx.commit().map_err(|e|e.to_string())?;
+    tx.commit().map_err(|e| e.to_string())?;
     Ok(false)
 }
 
 #[cfg(test)]
 mod learning_tests {
-    use super::{apply_entries, clear_single_word_correction, is_vocabulary_prompt_term, reviewable_correction, save_suggestion_in_connection, DictionaryEntry};
+    use super::{
+        apply_entries, clear_single_word_correction, is_vocabulary_prompt_term,
+        reviewable_correction, save_suggestion_in_connection, DictionaryEntry,
+    };
     use rusqlite::Connection;
     #[test]
     fn learns_only_single_word_replacements_automatically() {
@@ -664,7 +849,10 @@ mod learning_tests {
         assert!(!clear_single_word_correction("10", "10409027276"));
         assert!(!clear_single_word_correction("tí", "que"));
         assert!(!clear_single_word_correction("otra frase", "texto nuevo"));
-        assert!(!clear_single_word_correction("clave", "usuario@example.com"));
+        assert!(!clear_single_word_correction(
+            "clave",
+            "usuario@example.com"
+        ));
         assert!(!clear_single_word_correction("hola", "bola"));
         assert!(!clear_single_word_correction("girasol", "girasoles"));
         assert!(!clear_single_word_correction("girasoles", "girasol"));
@@ -676,10 +864,22 @@ mod learning_tests {
     #[test]
     fn numerical_edits_need_context_and_review() {
         assert!(!reviewable_correction("13x", "3x"));
-        assert!(reviewable_correction("ecuación es 13x + 4", "ecuación es 3x + 4"));
-        assert!(!clear_single_word_correction("ecuación es 13x + 4", "ecuación es 3x + 4"));
-        assert!(!reviewable_correction("RUC 10409027276 es", "RUC 10409027270 es"));
-        assert!(!reviewable_correction("usuario@example.com", "usuario@example.org"));
+        assert!(reviewable_correction(
+            "ecuación es 13x + 4",
+            "ecuación es 3x + 4"
+        ));
+        assert!(!clear_single_word_correction(
+            "ecuación es 13x + 4",
+            "ecuación es 3x + 4"
+        ));
+        assert!(!reviewable_correction(
+            "RUC 10409027276 es",
+            "RUC 10409027270 es"
+        ));
+        assert!(!reviewable_correction(
+            "usuario@example.com",
+            "usuario@example.org"
+        ));
     }
 
     #[test]
@@ -693,14 +893,19 @@ mod learning_tests {
     #[test]
     fn learned_word_replaces_future_transcripts_and_can_be_disabled() {
         let mut entries = vec![DictionaryEntry {
-            term: "girosol".into(), replacement: "girasoles".into(),
-            source: "learned".into(), enabled: true,
+            term: "girosol".into(),
+            replacement: "girasoles".into(),
+            source: "learned".into(),
+            enabled: true,
         }];
         let corrected = apply_entries(&entries, "Vi girosol. Los girasoles crecieron.").unwrap();
         assert_eq!(corrected.text, "Vi girasoles. Los girasoles crecieron.");
         assert_eq!(corrected.changes, 1);
         entries[0].enabled = false;
-        assert_eq!(apply_entries(&entries, "Vi girosol.").unwrap().text, "Vi girosol.");
+        assert_eq!(
+            apply_entries(&entries, "Vi girosol.").unwrap().text,
+            "Vi girosol."
+        );
     }
 
     #[test]
@@ -709,41 +914,86 @@ mod learning_tests {
         db.execute_batch("CREATE TABLE dictionary(term TEXT PRIMARY KEY COLLATE NOCASE,replacement TEXT NOT NULL);
             CREATE TABLE dictionary_meta(term TEXT PRIMARY KEY COLLATE NOCASE,source TEXT,enabled INTEGER);
             CREATE TABLE suggestions(term TEXT PRIMARY KEY COLLATE NOCASE,replacement TEXT);").unwrap();
-        assert!(save_suggestion_in_connection(&mut db,"girosol","girasoles").unwrap());
-        let stored:String = db.query_row("SELECT replacement FROM dictionary WHERE term='girosol'",[],|r|r.get(0)).unwrap();
-        assert_eq!(stored,"girasoles");
-        db.execute("UPDATE dictionary_meta SET enabled=0 WHERE term='girosol'",[]).unwrap();
-        assert!(!save_suggestion_in_connection(&mut db,"girosol","girasoles").unwrap());
-        let enabled:i64 = db.query_row("SELECT enabled FROM dictionary_meta WHERE term='girosol'",[],|r|r.get(0)).unwrap();
-        assert_eq!(enabled,0);
-        db.execute("UPDATE dictionary_meta SET source='manual',enabled=1 WHERE term='girosol'",[]).unwrap();
-        assert!(!save_suggestion_in_connection(&mut db,"girosol","girasoles").unwrap());
-        let source:String = db.query_row("SELECT source FROM dictionary_meta WHERE term='girosol'",[],|r|r.get(0)).unwrap();
-        assert_eq!(source,"manual");
+        assert!(save_suggestion_in_connection(&mut db, "girosol", "girasoles").unwrap());
+        let stored: String = db
+            .query_row(
+                "SELECT replacement FROM dictionary WHERE term='girosol'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(stored, "girasoles");
+        db.execute(
+            "UPDATE dictionary_meta SET enabled=0 WHERE term='girosol'",
+            [],
+        )
+        .unwrap();
+        assert!(!save_suggestion_in_connection(&mut db, "girosol", "girasoles").unwrap());
+        let enabled: i64 = db
+            .query_row(
+                "SELECT enabled FROM dictionary_meta WHERE term='girosol'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(enabled, 0);
+        db.execute(
+            "UPDATE dictionary_meta SET source='manual',enabled=1 WHERE term='girosol'",
+            [],
+        )
+        .unwrap();
+        assert!(!save_suggestion_in_connection(&mut db, "girosol", "girasoles").unwrap());
+        let source: String = db
+            .query_row(
+                "SELECT source FROM dictionary_meta WHERE term='girosol'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(source, "manual");
     }
 }
 
 #[tauri::command]
-pub fn dictionary_suggestions(app:AppHandle)->Result<Vec<DictionaryEntry>,String>{
-    let db=open(&app)?;
-    let mut query=db.prepare("SELECT term,replacement FROM suggestions ORDER BY rowid DESC LIMIT 100").map_err(|e|e.to_string())?;
-    let rows=query.query_map([],|r|Ok(DictionaryEntry{term:r.get(0)?,replacement:r.get(1)?,source:"suggestion".into(),enabled:false})).map_err(|e|e.to_string())?;
-    rows.collect::<Result<Vec<_>,_>>().map_err(|e|e.to_string())
+pub fn dictionary_suggestions(app: AppHandle) -> Result<Vec<DictionaryEntry>, String> {
+    let db = open(&app)?;
+    let mut query = db
+        .prepare("SELECT term,replacement FROM suggestions ORDER BY rowid DESC LIMIT 100")
+        .map_err(|e| e.to_string())?;
+    let rows = query
+        .query_map([], |r| {
+            Ok(DictionaryEntry {
+                term: r.get(0)?,
+                replacement: r.get(1)?,
+                source: "suggestion".into(),
+                enabled: false,
+            })
+        })
+        .map_err(|e| e.to_string())?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub async fn dictionary_review(app:AppHandle,term:String,replacement:String,accept:bool)->Result<(),String>{
+pub async fn dictionary_review(
+    app: AppHandle,
+    term: String,
+    replacement: String,
+    accept: bool,
+) -> Result<(), String> {
     if accept {
-        dictionary_upsert(app.clone(),term.clone(),replacement).await?;
+        dictionary_upsert(app.clone(), term.clone(), replacement).await?;
         open(&app)?.execute("INSERT INTO dictionary_meta(term,source,enabled) VALUES(?1,'learned',1) ON CONFLICT(term) DO UPDATE SET source='learned',enabled=1",[&term]).map_err(|e|e.to_string())?;
-        crate::notice::show(&app,"Corrección guardada en el diccionario");
+        crate::notice::show(&app, "Corrección guardada en el diccionario");
     }
-    open(&app)?.execute("DELETE FROM suggestions WHERE term=?1",[&term]).map_err(|e|e.to_string())?;
+    open(&app)?
+        .execute("DELETE FROM suggestions WHERE term=?1", [&term])
+        .map_err(|e| e.to_string())?;
     Ok(())
 }
 
 #[tauri::command]
-pub fn dictionary_set_enabled(app:AppHandle,term:String,enabled:bool)->Result<(),String>{
+pub fn dictionary_set_enabled(app: AppHandle, term: String, enabled: bool) -> Result<(), String> {
     open(&app)?.execute("INSERT INTO dictionary_meta(term,enabled) VALUES(?1,?2) ON CONFLICT(term) DO UPDATE SET enabled=excluded.enabled",params![term,enabled]).map_err(|e|e.to_string())?;
     Ok(())
 }

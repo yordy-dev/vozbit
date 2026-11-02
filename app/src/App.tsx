@@ -2,7 +2,7 @@ import { useEffect, useEffectEvent, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { availableMonitors, getCurrentWindow, LogicalSize, PhysicalPosition } from "@tauri-apps/api/window";
-import { cancelDictation, getLastDictation, getModelStatus, getSettings, getShortcutStatus, inDesktop, listInputDevices, listenDictationError, listenMicLevel, listenShortcutState, listenShortcutToggle, patchSettings, reprocessDictation, saveHistory, startDictation, stopDictation, testInputDevice, updateShortcut } from "./api";
+import { cancelDictation, forgetLastAudio, getLastDictation, getModelStatus, getSettings, getShortcutStatus, inDesktop, listInputDevices, listenDictationError, listenMicLevel, listenShortcutState, listenShortcutToggle, patchSettings, reprocessDictation, saveHistory, startDictation, stopDictation, testInputDevice, updateShortcut } from "./api";
 import { DictionaryPanel } from "./DictionaryPanel";
 import { HistoryPanel } from "./HistoryPanel";
 import { Icon, VoiceTextLogo } from "./Icons";
@@ -24,6 +24,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   preferred_device_id: "default",
   auto_insert: true,
   auto_save: true,
+  private_mode: false,
   append_trailing_space: true,
   text_correction: true,
   format_numbers: true,
@@ -128,6 +129,15 @@ export default function App() {
     }).catch((reason: unknown) => setSettingsError(`No se pudo preparar la configuración: ${errorText(reason)}`));
     void getModelStatus().then(setModel).catch((reason: unknown) => setSettingsError(`No se pudo verificar el modelo: ${errorText(reason)}`));
     void getShortcutStatus().then(setShortcut).catch((reason: unknown) => setDictationError(`No se pudo verificar el atajo: ${errorText(reason)}`));
+  }, []);
+
+  useEffect(() => {
+    if (!inDesktop) return;
+    const refreshDevices = () => {
+      void listInputDevices().then(setDevices).catch(() => undefined);
+    };
+    window.addEventListener("focus", refreshDevices);
+    return () => window.removeEventListener("focus", refreshDevices);
   }, []);
 
   useEffect(() => {
@@ -237,6 +247,7 @@ export default function App() {
     try {
       await patchSettings(patch);
       setSettings((current) => ({ ...current, ...patch }));
+      if (patch.private_mode === true) await forgetLastAudio();
       if (patch.history_limit !== undefined) setHistoryRevision((current) => current + 1);
     } catch (reason) {
       const message = errorText(reason);
@@ -261,7 +272,10 @@ export default function App() {
   }
 
   async function beginDictation(fromShortcut = false) {
-    if (!settings.preferred_device_id || dictationStateRef.current !== "idle" || !modelsReady) return;
+    if (!inDesktop) { setDictationError("Abre la aplicación de escritorio para dictar."); return; }
+    if (dictationStateRef.current !== "idle") return;
+    if (!modelsReady) { setDictationError("El motor local no está listo. Abre Configuración y comprueba sus archivos."); return; }
+    if (!settings.preferred_device_id) { setDictationError("Selecciona un micrófono antes de dictar."); return; }
     dictationStateRef.current = "starting";
     cancelOnReadyRef.current=false;
     setDictationState("starting"); setDictationError(""); setDictationResult(null); setSavedHistoryId(null); setCopyStatus(""); setDictationElapsed(0);
@@ -286,7 +300,7 @@ export default function App() {
     try {
       const completed = await stopDictation(settings.language);
       setDictationResult(completed);
-      if (settings.auto_save) {
+      if (settings.auto_save && !settings.private_mode) {
         try {
           const id = await saveHistory(completed);
           setSavedHistoryId(id);
@@ -296,6 +310,7 @@ export default function App() {
           setCopyStatus(`El texto está disponible, pero no se guardó en el historial: ${errorText(reason)}`);
         }
       }
+      if (settings.private_mode) setCopyStatus("Modo privado: el texto no se guardó y el audio no se conservará.");
     } catch (reason) {
       const message = errorText(reason);
       if (message === "Dictado cancelado" || message === "Transcripción cancelada") setCopyStatus("Dictado cancelado; no se insertó texto.");
@@ -320,7 +335,7 @@ export default function App() {
     try {
       const completed = await reprocessDictation(settings.language);
       setDictationResult(completed);
-      if (settings.auto_save) {
+      if (settings.auto_save && !settings.private_mode) {
         try {
           const id = await saveHistory(completed);
           setSavedHistoryId(id);
@@ -330,6 +345,7 @@ export default function App() {
           setCopyStatus(`Reprocesado, pero no guardado en el historial: ${errorText(reason)}`);
         }
       }
+      if (settings.private_mode) setCopyStatus("Modo privado: el texto reprocesado no se guardó.");
     } catch (reason) {
       setDictationError(errorText(reason));
       throw reason;
@@ -405,7 +421,7 @@ export default function App() {
                 <p className="vt-result-text">{dictationResult.transcript.text}</p>
                 {dictationResult.transcript.text.length > 160 && <details className="vt-result-full"><summary>Ver texto completo</summary><p>{dictationResult.transcript.text}</p></details>}
                 <div className="vt-result-footer"><span>{dictationResult.delivery.sent ? "Envío aceptado por Windows · verifica el campo" : dictationResult.delivery.reason ? "No se insertó · disponible para copiar" : "Entrega manual · listo para copiar"}</span><button className="vt-copy-button" type="button" onClick={() => void copyResult()}><Icon name="copy" size={15}/>Copiar</button></div>
-                {dictationResult.delivery.reason && <p className="vt-result-warning" role="alert">{dictationResult.delivery.reason}</p>}
+                {dictationResult.delivery.reason && <p className="vt-result-warning" role="alert" data-error-code={dictationResult.delivery.code ?? undefined}>{dictationResult.delivery.reason}</p>}
                 {dictationResult.dropped_chunks > 0 && <p className="vt-result-warning" role="alert">Se perdieron {dictationResult.dropped_chunks} fragmentos del micrófono. Revisa el texto.</p>}
                 {dictationResult.dictionary_warning && <p className="vt-result-warning" role="alert">{dictationResult.dictionary_warning}</p>}
                 <div className="vt-result-secondary"><button type="button" disabled={savingHistory || savedHistoryId !== null} onClick={() => void storeResult()}>{savedHistoryId !== null ? "Guardado en Historial" : savingHistory ? "Guardando…" : "Guardar en Historial"}</button><span>{dictationResult.dictionary_changes ? `${dictationResult.dictionary_changes} correcciones aplicadas` : ""}</span></div>

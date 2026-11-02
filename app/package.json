@@ -1,11 +1,14 @@
 {
   "name": "voicetext-local",
   "private": true,
-  "version": "0.5.8",
+  "version": "0.5.9",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
+    "test:static": "node tests/hardening-static.mjs",
+    "test:corrections": "pwsh -NoProfile -File tests/correction-diff.tests.ps1",
+    "test": "npm run build && npm run test:static && npm run test:corrections",
     "preview": "vite preview",
     "tauri": "tauri"
   },

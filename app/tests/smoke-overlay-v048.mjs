@@ -3,7 +3,11 @@ import { writeFile } from "node:fs/promises";
 const port = process.argv[2] ?? "9448";
 const screenshotPath = process.argv[3];
 const pages = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json();
-const main = pages.find((page) => page.url === "http://tauri.localhost/");
+const main = pages.find((page) => [
+  "http://tauri.localhost/",
+  "http://localhost:5173/",
+  "http://127.0.0.1:5173/",
+].includes(page.url));
 const overlay = pages.find((page) => page.url.includes("overlay=1"));
 if (!main || !overlay) throw Error("Faltan ventanas de la aplicación empaquetada");
 async function connect(page) {

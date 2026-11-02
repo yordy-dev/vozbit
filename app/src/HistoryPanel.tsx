@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { deleteHistory, inDesktop, listHistory, setHistoryFavorite } from "./api";
+import { clearHistory, deleteHistory, inDesktop, listHistory, setHistoryFavorite } from "./api";
 import { Icon } from "./Icons";
 import type { HistoryItem } from "./types";
 import "./history.css";
@@ -13,6 +13,8 @@ export function HistoryPanel({ revision }: { revision: number }) {
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [deleting, setDeleting] = useState<number | null>(null);
+  const [clearMode, setClearMode] = useState<"recent" | "all" | null>(null);
+  const [clearing, setClearing] = useState(false);
 
   useEffect(() => {
     if (!inDesktop) return;
@@ -55,10 +57,24 @@ export function HistoryPanel({ revision }: { revision: number }) {
     finally { setDeleting(null); }
   }
 
+  async function clear(includeFavorites: boolean) {
+    const mode = includeFavorites ? "all" : "recent";
+    if (clearMode !== mode) { setClearMode(mode); return; }
+    if (clearing) return;
+    setClearing(true);
+    try {
+      const removed = await clearHistory(includeFavorites);
+      setItems((current) => includeFavorites ? [] : current.filter((item) => item.favorite));
+      setMessage(`${removed} transcripci${removed === 1 ? "ón eliminada" : "ones eliminadas"} de este equipo.`);
+      setError("");
+    } catch (reason) { setError(errorText(reason)); }
+    finally { setClearMode(null); setClearing(false); }
+  }
+
   return <section className="recent-section" aria-labelledby="recent-title">
     <div className="recent-tools">
       <h2 id="recent-title">Transcripciones recientes</h2>
-      {(items.length > 0 || query.length > 0) && <input aria-label="Buscar transcripciones" type="search" value={query} onChange={(event) => setQuery(event.target.value)} maxLength={200} placeholder="Buscar" />}
+      <div className="history-toolbar">{(items.length > 0 || query.length > 0) && <input aria-label="Buscar transcripciones" type="search" value={query} onChange={(event) => setQuery(event.target.value)} maxLength={200} placeholder="Buscar" />}{items.length > 0 && <details onToggle={(event) => { if (!(event.currentTarget as HTMLDetailsElement).open) setClearMode(null); }}><summary>Limpiar</summary><div><button type="button" disabled={clearing} className={clearMode === "recent" ? "confirm" : ""} onClick={() => void clear(false)}>{clearing && clearMode === "recent" ? "Eliminando…" : clearMode === "recent" ? "Confirmar no favoritos" : "Eliminar no favoritos"}</button><button type="button" disabled={clearing} className={clearMode === "all" ? "confirm" : ""} onClick={() => void clear(true)}>{clearing && clearMode === "all" ? "Eliminando…" : clearMode === "all" ? "Confirmar todo" : "Eliminar todo"}</button></div></details>}</div>
     </div>
     {loading && items.length === 0 ? <div className="history-empty" role="status">Cargando tus transcripciones…</div> : null}
     {!loading && items.length === 0 && <div className="history-empty"><p>{query ? "No hay coincidencias." : "Todavía no hay transcripciones."}</p><span>{query ? "Prueba con otra palabra." : "Pulsa tu atajo global en cualquier aplicación y habla; el texto aparecerá aquí cuando lo guardes."}</span></div>}

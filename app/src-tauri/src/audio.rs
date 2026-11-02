@@ -277,7 +277,9 @@ pub(crate) fn capture_input(
             sink.push(&samples[first..], input_rate);
         }
     }
-    if let Some(sink) = &mut prefetch { sink.finish(); }
+    if let Some(sink) = &mut prefetch {
+        sink.finish();
+    }
     if samples.is_empty() {
         return Err("No llegaron muestras. Comprueba el permiso de micrófono de Windows".into());
     }

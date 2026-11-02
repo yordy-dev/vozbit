@@ -1,35 +1,42 @@
 mod audio;
 mod delivery;
+mod diagnostics;
 mod dictation;
-mod resample;
-mod shortcut;
-mod storage;
-mod transcription;
-mod streaming;
-mod streaming_core;
 mod formatting;
 mod learning;
 mod notice;
+mod resample;
+mod shortcut;
+mod storage;
+mod streaming;
+mod streaming_core;
+mod transcription;
 
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
+use std::time::Duration;
 use tauri::{
     menu::{MenuBuilder, SubmenuBuilder},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     Emitter, Manager, PhysicalPosition,
 };
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Mutex;
-use std::time::Duration;
 
 static HIDE_NOTICE_CHECKED: AtomicBool = AtomicBool::new(false);
 static MAIN_POSITION_READY: AtomicBool = AtomicBool::new(false);
 static MAIN_POSITION: Mutex<Option<(i32, i32)>> = Mutex::new(None);
 
 fn save_main_position(app: &tauri::AppHandle, position: (i32, i32)) {
-    let _ = storage::write_setting(app, "main_position", &format!("{},{}", position.0, position.1));
+    let _ = storage::write_setting(
+        app,
+        "main_position",
+        &format!("{},{}", position.0, position.1),
+    );
 }
 
 fn restore_main_position(app: &tauri::AppHandle, window: &tauri::WebviewWindow) {
-    let saved = storage::read_setting(app, "main_position").ok().flatten()
+    let saved = storage::read_setting(app, "main_position")
+        .ok()
+        .flatten()
         .and_then(|value| {
             let (x, y) = value.split_once(',')?;
             Some((x.parse::<i32>().ok()?, y.parse::<i32>().ok()?))
@@ -44,10 +51,18 @@ fn restore_main_position(app: &tauri::AppHandle, window: &tauri::WebviewWindow) 
             dx + dy
         })?;
         let area = monitor.work_area();
-        let max_x = area.position.x.saturating_add(area.size.width as i32 - size.width as i32);
-        let max_y = area.position.y.saturating_add(area.size.height as i32 - size.height as i32);
-        Some((x.clamp(area.position.x, max_x.max(area.position.x)),
-              y.clamp(area.position.y, max_y.max(area.position.y))))
+        let max_x = area
+            .position
+            .x
+            .saturating_add(area.size.width as i32 - size.width as i32);
+        let max_y = area
+            .position
+            .y
+            .saturating_add(area.size.height as i32 - size.height as i32);
+        Some((
+            x.clamp(area.position.x, max_x.max(area.position.x)),
+            y.clamp(area.position.y, max_y.max(area.position.y)),
+        ))
     });
     if let Some((x, y)) = restored {
         let _ = window.set_position(PhysicalPosition::new(x, y));
@@ -62,7 +77,9 @@ fn show_main(app: &tauri::AppHandle, destination: Option<&str>) {
         let _ = window.unminimize();
         let _ = window.show();
         let _ = window.set_focus();
-        if let Some(destination) = destination { let _ = app.emit("ui://navigate", destination); }
+        if let Some(destination) = destination {
+            let _ = app.emit("ui://navigate", destination);
+        }
     }
 }
 
@@ -83,6 +100,13 @@ pub fn run() {
         .manage(dictation::LastResultState::default())
         .manage(shortcut::ShortcutStatusState::default())
         .setup(|app| {
+            let _ = transcription::cleanup_stale_files(app.handle());
+            if let Err(error) = storage::database_quick_check(app.handle()) {
+                notice::show(
+                    app.handle(),
+                    &format!("La base local necesita revisión: {error}. Abre Configuración > Datos y app > Diagnóstico local."),
+                );
+            }
             if let Some(window) = app.get_webview_window("main") {
                 restore_main_position(app.handle(), &window);
             }
@@ -147,6 +171,7 @@ pub fn run() {
                         if let Some(position) = MAIN_POSITION.lock().ok().and_then(|value| *value) {
                             save_main_position(app, position);
                         }
+                        dictation::request_shutdown(&app.state::<dictation::DictationState>());
                         app.exit(0)
                     },
                     _ => {}
@@ -214,6 +239,7 @@ pub fn run() {
             dictation::dictation_cancel,
             dictation::overlay_drag,
             dictation::dictation_status,
+            dictation::dictation_forget_audio,
             dictation::dictation_last_result,
             dictation::transcription_cancel,
             dictation::dictation_reprocess,
@@ -221,6 +247,8 @@ pub fn run() {
             storage::history_list,
             storage::history_set_favorite,
             storage::history_delete,
+            storage::history_clear,
+            storage::data_backup_create,
             shortcut::shortcut_status,
             shortcut::shortcut_update,
             storage::dictionary_list,
@@ -231,8 +259,15 @@ pub fn run() {
             storage::dictionary_review,
             storage::dictionary_set_enabled,
             storage::settings_get,
-            storage::settings_patch
+            storage::settings_patch,
+            diagnostics::diagnostics_run,
+            diagnostics::diagnostics_export
         ])
-        .run(tauri::generate_context!())
-        .expect("No se pudo iniciar Vozbit");
+        .build(tauri::generate_context!())
+        .expect("No se pudo iniciar Vozbit")
+        .run(|app, event| {
+            if matches!(event, tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit) {
+                dictation::request_shutdown(&app.state::<dictation::DictationState>());
+            }
+        });
 }

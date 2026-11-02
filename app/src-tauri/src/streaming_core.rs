@@ -70,7 +70,9 @@ pub(crate) fn pcm_wav(samples: &[f32]) -> Result<Vec<u8>, String> {
         .checked_mul(2)
         .and_then(|n| u32::try_from(n).ok())
         .ok_or("El fragmento de audio es demasiado grande")?;
-    let riff_size = 36_u32.checked_add(bytes).ok_or("El WAV es demasiado grande")?;
+    let riff_size = 36_u32
+        .checked_add(bytes)
+        .ok_or("El WAV es demasiado grande")?;
     let mut wav = Vec::with_capacity(44 + bytes as usize);
     wav.extend_from_slice(b"RIFF");
     wav.extend_from_slice(&riff_size.to_le_bytes());
@@ -85,7 +87,9 @@ pub(crate) fn pcm_wav(samples: &[f32]) -> Result<Vec<u8>, String> {
     wav.extend_from_slice(b"data");
     wav.extend_from_slice(&bytes.to_le_bytes());
     for sample in samples {
-        wav.extend_from_slice(&((sample.clamp(-1.0, 1.0) * i16::MAX as f32).round() as i16).to_le_bytes());
+        wav.extend_from_slice(
+            &((sample.clamp(-1.0, 1.0) * i16::MAX as f32).round() as i16).to_le_bytes(),
+        );
     }
     Ok(wav)
 }
@@ -98,16 +102,25 @@ mod tests {
     fn segments_at_a_real_pause_and_preserves_frames() {
         let mut planner = SegmentPlanner::default();
         assert!(planner
-            .push(AudioChunk { sample_rate: 16_000, samples: vec![0.1; 16_000 * 5] })
+            .push(AudioChunk {
+                sample_rate: 16_000,
+                samples: vec![0.1; 16_000 * 5]
+            })
             .unwrap()
             .is_none());
         let first = planner
-            .push(AudioChunk { sample_rate: 16_000, samples: vec![0.0; 16_000 / 2] })
+            .push(AudioChunk {
+                sample_rate: 16_000,
+                samples: vec![0.0; 16_000 / 2],
+            })
             .unwrap()
             .unwrap();
         assert_eq!(first.len(), 88_000);
         assert!(planner
-            .push(AudioChunk { sample_rate: 16_000, samples: vec![0.2; 16_000 * 2] })
+            .push(AudioChunk {
+                sample_rate: 16_000,
+                samples: vec![0.2; 16_000 * 2]
+            })
             .unwrap()
             .is_none());
         assert_eq!(planner.finish().unwrap().len(), 32_000);
@@ -117,15 +130,28 @@ mod tests {
     fn never_cuts_uninterrupted_speech() {
         let mut planner = SegmentPlanner::default();
         assert!(planner
-            .push(AudioChunk { sample_rate: 16_000, samples: vec![0.1; 16_000 * 27] })
+            .push(AudioChunk {
+                sample_rate: 16_000,
+                samples: vec![0.1; 16_000 * 27]
+            })
             .is_err());
     }
 
     #[test]
     fn rejects_rate_changes() {
         let mut planner = SegmentPlanner::default();
-        planner.push(AudioChunk { sample_rate: 16_000, samples: vec![0.1; 16_000] }).unwrap();
-        assert!(planner.push(AudioChunk { sample_rate: 48_000, samples: vec![0.1; 48_000] }).is_err());
+        planner
+            .push(AudioChunk {
+                sample_rate: 16_000,
+                samples: vec![0.1; 16_000],
+            })
+            .unwrap();
+        assert!(planner
+            .push(AudioChunk {
+                sample_rate: 48_000,
+                samples: vec![0.1; 48_000]
+            })
+            .is_err());
     }
 
     #[test]
@@ -133,7 +159,10 @@ mod tests {
         let bytes = pcm_wav(&[0.0, 1.0]).unwrap();
         assert_eq!(&bytes[0..4], b"RIFF");
         assert_eq!(&bytes[8..16], b"WAVEfmt ");
-        assert_eq!(u32::from_le_bytes(bytes[24..28].try_into().unwrap()), 16_000);
+        assert_eq!(
+            u32::from_le_bytes(bytes[24..28].try_into().unwrap()),
+            16_000
+        );
         assert_eq!(u32::from_le_bytes(bytes[40..44].try_into().unwrap()), 4);
         assert_eq!(bytes.len(), 48);
     }

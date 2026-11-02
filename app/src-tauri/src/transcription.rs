@@ -11,9 +11,12 @@ use tauri::{AppHandle, Manager};
 
 const MODEL_SHA256: &str = "422f1ae452ade6f30a004d7e5c6a43195e4433bc370bf23fac9cc591f01a8898";
 const VAD_SHA256: &str = "2aa269b785eeb53a82983a20501ddf7c1d9c48e33ab63a41391ac6c9f7fb6987";
-const PARAKEET_MODEL_SHA256: &str = "c2fb452a9df468a141012b01c8c168a25ce93f710897c7de6e353c6cc250986a";
-const PARAKEET_CLI_SHA256: &str = "d5c164ce0f5e83e674260d9fb5c67025c9c38a935c9ccd1f68793fc1c7cc50b7";
-const PARAKEET_VAD_SHA256: &str = "8160489282352accc0e95925c2f6bf3d76fb8f7bccdce5c7e46808cb15e8443c";
+const PARAKEET_MODEL_SHA256: &str =
+    "c2fb452a9df468a141012b01c8c168a25ce93f710897c7de6e353c6cc250986a";
+const PARAKEET_CLI_SHA256: &str =
+    "d5c164ce0f5e83e674260d9fb5c67025c9c38a935c9ccd1f68793fc1c7cc50b7";
+const PARAKEET_VAD_SHA256: &str =
+    "8160489282352accc0e95925c2f6bf3d76fb8f7bccdce5c7e46808cb15e8443c";
 const _: () = {
     assert!(MODEL_SHA256.len() == 64);
     assert!(VAD_SHA256.len() == 64);
@@ -23,10 +26,60 @@ const _: () = {
 };
 static TRANSCRIPTION_ACTIVE: AtomicBool = AtomicBool::new(false);
 static CANCEL_REQUESTED: AtomicBool = AtomicBool::new(false);
-pub fn cancel() { CANCEL_REQUESTED.store(true, Ordering::Release); }
+pub fn cancel() {
+    CANCEL_REQUESTED.store(true, Ordering::Release);
+}
+
+pub(crate) fn cleanup_stale_files(app: &AppHandle) -> Result<usize, String> {
+    let directory = app
+        .path()
+        .app_cache_dir()
+        .map_err(|error| format!("No se encontró la carpeta temporal: {error}"))?
+        .join("transcription");
+    if !directory.exists() {
+        return Ok(0);
+    }
+    let now = SystemTime::now();
+    let mut removed = 0;
+    for entry in fs::read_dir(&directory)
+        .map_err(|error| format!("No se pudo revisar la carpeta temporal: {error}"))?
+    {
+        let Ok(entry) = entry else { continue };
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if ![
+            "transcribe-",
+            "parakeet-preload-",
+            "parakeet-output-",
+            "whisper-output-",
+        ]
+        .iter()
+        .any(|prefix| name.starts_with(prefix))
+        {
+            continue;
+        }
+        let old = entry
+            .metadata()
+            .ok()
+            .and_then(|metadata| metadata.modified().ok())
+            .and_then(|modified| now.duration_since(modified).ok())
+            .is_some_and(|age| age >= Duration::from_secs(6 * 60 * 60));
+        if old && fs::remove_file(path).is_ok() {
+            removed += 1;
+        }
+    }
+    Ok(removed)
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum TranscriptionEngine { Whisper, ParakeetUltra }
+pub(crate) enum TranscriptionEngine {
+    Whisper,
+    ParakeetUltra,
+}
 
 impl TranscriptionEngine {
     fn name(self) -> &'static str {
@@ -114,16 +167,30 @@ fn resources(app: &AppHandle) -> Result<(PathBuf, PathBuf), String> {
 
 fn parakeet_resources(app: &AppHandle) -> Result<(PathBuf, PathBuf, PathBuf), String> {
     use tauri::path::BaseDirectory;
-    let model = app.path().resolve("resources/models/ultra-q8_0.gguf", BaseDirectory::Resource)
+    let model = app
+        .path()
+        .resolve("resources/models/ultra-q8_0.gguf", BaseDirectory::Resource)
         .map_err(|error| format!("No se encontró la ruta de Parakeet Ultra: {error}"))?;
-    let engine = app.path().resolve("resources/parakeet/parakeet-cli.exe", BaseDirectory::Resource)
+    let engine = app
+        .path()
+        .resolve(
+            "resources/parakeet/parakeet-cli.exe",
+            BaseDirectory::Resource,
+        )
         .map_err(|error| format!("No se encontró el motor Parakeet: {error}"))?;
-    let vad = app.path().resolve("resources/models/silero-vad-f16.gguf", BaseDirectory::Resource)
+    let vad = app
+        .path()
+        .resolve(
+            "resources/models/silero-vad-f16.gguf",
+            BaseDirectory::Resource,
+        )
         .map_err(|error| format!("No se encontró el detector de voz de Parakeet: {error}"))?;
     Ok((model, engine, vad))
 }
 
-pub(crate) fn verify_parakeet_resources(app: &AppHandle) -> Result<(PathBuf, PathBuf, PathBuf), String> {
+pub(crate) fn verify_parakeet_resources(
+    app: &AppHandle,
+) -> Result<(PathBuf, PathBuf, PathBuf), String> {
     let (model, engine, vad) = parakeet_resources(app)?;
     for (path, expected, label) in [
         (&model, PARAKEET_MODEL_SHA256, "modelo Parakeet Ultra"),
@@ -135,7 +202,10 @@ pub(crate) fn verify_parakeet_resources(app: &AppHandle) -> Result<(PathBuf, Pat
         }
         let actual = sha256(path)?;
         if actual != expected {
-            return Err(format!("El {label} no pasó la comprobación de integridad (archivo: {}; SHA-256: {actual})", path.display()));
+            return Err(format!(
+                "El {label} no pasó la comprobación de integridad (archivo: {}; SHA-256: {actual})",
+                path.display()
+            ));
         }
     }
     Ok((model, engine, vad))
@@ -152,12 +222,16 @@ fn vad_resource(app: &AppHandle) -> Result<PathBuf, String> {
 }
 
 pub(crate) fn sha256(path: &Path) -> Result<String, String> {
-    type Cache = std::collections::HashMap<PathBuf,(u64,SystemTime,String)>;
+    type Cache = std::collections::HashMap<PathBuf, (u64, SystemTime, String)>;
     static CACHE: std::sync::OnceLock<std::sync::Mutex<Cache>> = std::sync::OnceLock::new();
-    let metadata=fs::metadata(path).map_err(|e|e.to_string())?;
-    let modified=metadata.modified().map_err(|e|e.to_string())?;
-    if let Ok(cache)=CACHE.get_or_init(Default::default).lock() {
-        if let Some((size,time,digest))=cache.get(path) { if *size==metadata.len() && *time==modified {return Ok(digest.clone())} }
+    let metadata = fs::metadata(path).map_err(|e| e.to_string())?;
+    let modified = metadata.modified().map_err(|e| e.to_string())?;
+    if let Ok(cache) = CACHE.get_or_init(Default::default).lock() {
+        if let Some((size, time, digest)) = cache.get(path) {
+            if *size == metadata.len() && *time == modified {
+                return Ok(digest.clone());
+            }
+        }
     }
     let mut file = File::open(path).map_err(|_| "No se pudo abrir el modelo local".to_string())?;
     let mut hasher = Sha256::new();
@@ -171,8 +245,13 @@ pub(crate) fn sha256(path: &Path) -> Result<String, String> {
         }
         hasher.update(&buffer[..count]);
     }
-    let digest=format!("{:x}", hasher.finalize());
-    if let Ok(mut cache)=CACHE.get_or_init(Default::default).lock(){cache.insert(path.to_path_buf(),(metadata.len(),modified,digest.clone()));}
+    let digest = format!("{:x}", hasher.finalize());
+    if let Ok(mut cache) = CACHE.get_or_init(Default::default).lock() {
+        cache.insert(
+            path.to_path_buf(),
+            (metadata.len(), modified, digest.clone()),
+        );
+    }
     Ok(digest)
 }
 
@@ -195,8 +274,11 @@ pub(crate) fn initial_prompt(app: &AppHandle, language: &str) -> String {
         _ => "",
     };
     let terms = storage::dictionary_prompt_terms(app).unwrap_or_default();
-    if terms.is_empty() { base.to_string() }
-    else { format!("{base} Vocabulario preferido: {}.", terms.join(", ")) }
+    if terms.is_empty() {
+        base.to_string()
+    } else {
+        format!("{base} Vocabulario preferido: {}.", terms.join(", "))
+    }
 }
 
 pub(crate) fn result_from_raw(
@@ -206,7 +288,14 @@ pub(crate) fn result_from_raw(
     audio_seconds: f64,
     inference_ms: u128,
 ) -> Result<TranscriptionResult, String> {
-    result_from_raw_for_engine(app, raw_text, language, audio_seconds, inference_ms, TranscriptionEngine::Whisper)
+    result_from_raw_for_engine(
+        app,
+        raw_text,
+        language,
+        audio_seconds,
+        inference_ms,
+        TranscriptionEngine::Whisper,
+    )
 }
 
 pub(crate) fn result_from_raw_for_engine(
@@ -220,10 +309,17 @@ pub(crate) fn result_from_raw_for_engine(
     if raw_text.trim().is_empty() {
         return Err("No se detectó voz en esta grabación".into());
     }
-    let text_correction = storage::read_setting(app, "text_correction")?.as_deref() != Some("false");
+    let text_correction =
+        storage::read_setting(app, "text_correction")?.as_deref() != Some("false");
     let format_numbers = storage::read_setting(app, "format_numbers")?.as_deref() != Some("false");
     let math_symbols = storage::read_setting(app, "math_symbols")?.as_deref() != Some("false");
-    let text = formatting::format_transcript(raw_text, language, text_correction, format_numbers, math_symbols);
+    let text = formatting::format_transcript(
+        raw_text,
+        language,
+        text_correction,
+        format_numbers,
+        math_symbols,
+    );
     Ok(TranscriptionResult {
         text,
         requested_language: language.to_string(),
@@ -244,11 +340,17 @@ pub async fn model_status(app: AppHandle) -> Result<ModelStatus, String> {
         let vad_available = vad.is_file();
         let vad_sha256_ok = vad_available && sha256(&vad)? == VAD_SHA256;
         let (parakeet_model, parakeet_engine, parakeet_vad) = parakeet_resources(&app)?;
-        let parakeet_size_bytes = parakeet_model.metadata().map(|item| item.len()).unwrap_or(0);
+        let parakeet_size_bytes = parakeet_model
+            .metadata()
+            .map(|item| item.len())
+            .unwrap_or(0);
         let parakeet_available = parakeet_size_bytes > 0;
-        let parakeet_sha256_ok = parakeet_available && sha256(&parakeet_model)? == PARAKEET_MODEL_SHA256;
-        let parakeet_engine_available = parakeet_engine.is_file() && sha256(&parakeet_engine)? == PARAKEET_CLI_SHA256;
-        let parakeet_vad_sha256_ok = parakeet_vad.is_file() && sha256(&parakeet_vad)? == PARAKEET_VAD_SHA256;
+        let parakeet_sha256_ok =
+            parakeet_available && sha256(&parakeet_model)? == PARAKEET_MODEL_SHA256;
+        let parakeet_engine_available =
+            parakeet_engine.is_file() && sha256(&parakeet_engine)? == PARAKEET_CLI_SHA256;
+        let parakeet_vad_sha256_ok =
+            parakeet_vad.is_file() && sha256(&parakeet_vad)? == PARAKEET_VAD_SHA256;
         Ok(ModelStatus {
             name: "Whisper base q5_1 multilingüe",
             available,
@@ -368,7 +470,13 @@ pub(crate) fn transcribe_pcm_with_preload(
     language: &str,
     preload: Option<ParakeetPreload>,
 ) -> Result<TranscriptionResult, String> {
-    transcribe_pcm_inner(app, samples, language, TranscriptionEngine::ParakeetUltra, preload)
+    transcribe_pcm_inner(
+        app,
+        samples,
+        language,
+        TranscriptionEngine::ParakeetUltra,
+        preload,
+    )
 }
 
 fn transcribe_pcm_inner(
@@ -459,7 +567,9 @@ fn run_engine(
 }
 
 #[derive(Deserialize)]
-struct ParakeetOutput { text: String }
+struct ParakeetOutput {
+    text: String,
+}
 
 pub(crate) struct ParakeetPreload {
     child: Child,
@@ -469,20 +579,32 @@ pub(crate) struct ParakeetPreload {
 impl ParakeetPreload {
     pub(crate) fn start(app: &AppHandle) -> Result<Self, String> {
         let (model, executable, vad) = verify_parakeet_resources(app)?;
-        let directory = app.path().app_cache_dir()
+        let directory = app
+            .path()
+            .app_cache_dir()
             .map_err(|error| format!("No se encontró la carpeta temporal: {error}"))?
             .join("transcription");
         fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
-        let output_path = directory.join(format!("parakeet-preload-{}-{}.tmp",
+        let output_path = directory.join(format!(
+            "parakeet-preload-{}-{}.tmp",
             std::process::id(),
-            SystemTime::now().duration_since(UNIX_EPOCH).map_err(|error| error.to_string())?.as_nanos()));
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map_err(|error| error.to_string())?
+                .as_nanos()
+        ));
         let output_file = File::create(&output_path).map_err(|error| error.to_string())?;
         let threads = std::thread::available_parallelism()
             .map(|count| (count.get() / 2).clamp(1, 4))
             .unwrap_or(2)
             .to_string();
         let mut command = Command::new(&executable);
-        command.current_dir(executable.parent().ok_or("Ruta del motor Parakeet inválida")?)
+        command
+            .current_dir(
+                executable
+                    .parent()
+                    .ok_or("Ruta del motor Parakeet inválida")?,
+            )
             .args(["transcribe", "--model"])
             .arg(&model)
             .args(["--input", "-", "--json", "--vad", "--vad-model"])
@@ -502,12 +624,22 @@ impl ParakeetPreload {
         Ok(Self { child, output_path })
     }
 
-    fn finish(mut self, app: &AppHandle, input: &Path, language: &str, audio_seconds: f64)
-        -> Result<TranscriptionResult, String> {
+    fn finish(
+        mut self,
+        app: &AppHandle,
+        input: &Path,
+        language: &str,
+        audio_seconds: f64,
+    ) -> Result<TranscriptionResult, String> {
         let started = Instant::now();
-        let mut stdin = self.child.stdin.take().ok_or("Parakeet anticipado no aceptó audio")?;
+        let mut stdin = self
+            .child
+            .stdin
+            .take()
+            .ok_or("Parakeet anticipado no aceptó audio")?;
         let mut wav = File::open(input).map_err(|error| error.to_string())?;
-        std::io::copy(&mut wav, &mut stdin).map_err(|error| format!("No se pudo enviar audio a Parakeet: {error}"))?;
+        std::io::copy(&mut wav, &mut stdin)
+            .map_err(|error| format!("No se pudo enviar audio a Parakeet: {error}"))?;
         drop(stdin);
         let timeout = Duration::from_secs(180);
         let status = loop {
@@ -516,20 +648,31 @@ impl ParakeetPreload {
             }
             match self.child.try_wait() {
                 Ok(Some(status)) => break status,
-                Ok(None) if started.elapsed() < timeout => std::thread::sleep(Duration::from_millis(100)),
+                Ok(None) if started.elapsed() < timeout => {
+                    std::thread::sleep(Duration::from_millis(100))
+                }
                 Ok(None) => return Err("Parakeet superó tres minutos y se detuvo".into()),
                 Err(error) => return Err(format!("No se pudo supervisar Parakeet: {error}")),
             }
         };
         if !status.success() {
-            return Err(format!("Parakeet anticipado terminó con el código {}", status.code().unwrap_or(-1)));
+            return Err(format!(
+                "Parakeet anticipado terminó con el código {}",
+                status.code().unwrap_or(-1)
+            ));
         }
         let output = fs::read_to_string(&self.output_path)
             .map_err(|_| "No se pudo leer el resultado de Parakeet".to_string())?;
         let raw: ParakeetOutput = serde_json::from_str(output.trim())
             .map_err(|_| "Parakeet anticipado devolvió una respuesta inválida".to_string())?;
-        result_from_raw_for_engine(app, &raw.text, language, audio_seconds,
-            started.elapsed().as_millis(), TranscriptionEngine::ParakeetUltra)
+        result_from_raw_for_engine(
+            app,
+            &raw.text,
+            language,
+            audio_seconds,
+            started.elapsed().as_millis(),
+            TranscriptionEngine::ParakeetUltra,
+        )
     }
 }
 
@@ -554,14 +697,22 @@ fn run_parakeet(
     let output_path = input.with_file_name(format!(
         "parakeet-output-{}-{}.tmp",
         std::process::id(),
-        SystemTime::now().duration_since(UNIX_EPOCH).map_err(|error| error.to_string())?.as_nanos()
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|error| error.to_string())?
+            .as_nanos()
     ));
     let output_file = File::create(&output_path)
         .map_err(|_| "No se pudo crear la salida temporal de Parakeet".to_string())?;
     let _output_guard = TemporaryAudio(output_path.clone());
     let started = Instant::now();
     let mut command = Command::new(&executable);
-    command.current_dir(executable.parent().ok_or("Ruta del motor Parakeet inválida")?)
+    command
+        .current_dir(
+            executable
+                .parent()
+                .ok_or("Ruta del motor Parakeet inválida")?,
+        )
         .args(["transcribe", "--model"])
         .arg(&model)
         .arg("--input")
@@ -573,35 +724,54 @@ fn run_parakeet(
         .stderr(Stdio::null());
     #[cfg(windows)]
     command.creation_flags(0x08000000);
-    let mut child = command.spawn()
+    let mut child = command
+        .spawn()
         .map_err(|_| "No se pudo iniciar Parakeet Ultra".to_string())?;
     let timeout = Duration::from_secs(180);
     let status = loop {
         if CANCEL_REQUESTED.load(Ordering::Acquire) {
-            let _ = child.kill(); let _ = child.wait();
+            let _ = child.kill();
+            let _ = child.wait();
             return Err("Transcripción cancelada".into());
         }
         match child.try_wait() {
             Ok(Some(status)) => break status,
-            Ok(None) if started.elapsed() < timeout => std::thread::sleep(Duration::from_millis(100)),
+            Ok(None) if started.elapsed() < timeout => {
+                std::thread::sleep(Duration::from_millis(100))
+            }
             Ok(None) => {
-                let _ = child.kill(); let _ = child.wait();
-                return Err("Parakeet superó tres minutos y se detuvo; prueba una grabación más corta".into());
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(
+                    "Parakeet superó tres minutos y se detuvo; prueba una grabación más corta"
+                        .into(),
+                );
             }
             Err(_) => {
-                let _ = child.kill(); let _ = child.wait();
+                let _ = child.kill();
+                let _ = child.wait();
                 return Err("No se pudo supervisar Parakeet Ultra".into());
             }
         }
     };
     if !status.success() {
-        return Err(format!("Parakeet Ultra terminó con el código {}", status.code().unwrap_or(-1)));
+        return Err(format!(
+            "Parakeet Ultra terminó con el código {}",
+            status.code().unwrap_or(-1)
+        ));
     }
     let output = fs::read_to_string(&output_path)
         .map_err(|_| "No se pudo leer el resultado de Parakeet".to_string())?;
     let raw: ParakeetOutput = serde_json::from_str(output.trim())
         .map_err(|_| "Parakeet devolvió una respuesta inválida".to_string())?;
-    result_from_raw_for_engine(app, &raw.text, language, audio_seconds, started.elapsed().as_millis(), TranscriptionEngine::ParakeetUltra)
+    result_from_raw_for_engine(
+        app,
+        &raw.text,
+        language,
+        audio_seconds,
+        started.elapsed().as_millis(),
+        TranscriptionEngine::ParakeetUltra,
+    )
 }
 
 fn run_whisper(
@@ -651,7 +821,8 @@ fn run_whisper(
     let timeout = Duration::from_secs(180);
     let status = loop {
         if CANCEL_REQUESTED.load(Ordering::Acquire) {
-            let _ = child.kill(); let _ = child.wait();
+            let _ = child.kill();
+            let _ = child.wait();
             return Err("Transcripción cancelada".into());
         }
         match child.try_wait() {
@@ -685,7 +856,13 @@ fn run_whisper(
                 .into(),
         );
     }
-    result_from_raw(app, &raw_text, language, audio_seconds, start.elapsed().as_millis())
+    result_from_raw(
+        app,
+        &raw_text,
+        language,
+        audio_seconds,
+        start.elapsed().as_millis(),
+    )
 }
 
 #[cfg(windows)]

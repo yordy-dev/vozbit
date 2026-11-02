@@ -8,10 +8,10 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, LogicalSize, State};
+use tauri::{AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, State};
 
 const MAX_DURATION: Duration = Duration::from_secs(120);
-static SESSION_CANCELLED:AtomicBool=AtomicBool::new(false);
+static SESSION_CANCELLED: AtomicBool = AtomicBool::new(false);
 static OVERLAY_GENERATION: AtomicU64 = AtomicU64::new(0);
 const ERROR_DISPLAY_TIME: Duration = Duration::from_millis(2800);
 
@@ -72,13 +72,18 @@ fn show_overlay(app: &AppHandle, target: Option<DeliveryTarget>) -> Result<(), S
         .set_size(requested_size)
         .map_err(|error| format!("No se pudo ajustar el indicador visual: {error}"))?;
     let target_monitor = target.and_then(delivery::window_center).and_then(|(x, y)| {
-        window.available_monitors().ok()?.into_iter().find(|monitor| {
-            let position = monitor.position();
-            let size = monitor.size();
-            x >= position.x && y >= position.y
-                && x < position.x + size.width as i32
-                && y < position.y + size.height as i32
-        })
+        window
+            .available_monitors()
+            .ok()?
+            .into_iter()
+            .find(|monitor| {
+                let position = monitor.position();
+                let size = monitor.size();
+                x >= position.x
+                    && y >= position.y
+                    && x < position.x + size.width as i32
+                    && y < position.y + size.height as i32
+            })
     });
     if let Some(monitor) = target_monitor.or_else(|| window.current_monitor().ok().flatten()) {
         if let Ok(size) = window.outer_size() {
@@ -91,25 +96,46 @@ fn show_overlay(app: &AppHandle, target: Option<DeliveryTarget>) -> Result<(), S
             let x = position.x + (area.width as i32 - size.width as i32) / 2;
             let y = match placement.as_str() {
                 "top_center" => position.y + 36,
-                "bottom_center" => {
-                    position.y + area.height as i32 - size.height as i32 - 58
-                }
+                "bottom_center" => position.y + area.height as i32 - size.height as i32 - 58,
                 _ => position.y + (area.height as i32 - size.height as i32) / 2,
             };
             let _ = window.set_position(PhysicalPosition::new(x, y));
-            if storage::read_setting(app, "overlay_custom").ok().flatten().as_deref() == Some("true") {
-                if let (Some(x),Some(y)) = (storage::read_setting(app,"overlay_x").ok().flatten().and_then(|s|s.parse::<i32>().ok()), storage::read_setting(app,"overlay_y").ok().flatten().and_then(|s|s.parse::<i32>().ok())) {
+            if storage::read_setting(app, "overlay_custom")
+                .ok()
+                .flatten()
+                .as_deref()
+                == Some("true")
+            {
+                if let (Some(x), Some(y)) = (
+                    storage::read_setting(app, "overlay_x")
+                        .ok()
+                        .flatten()
+                        .and_then(|s| s.parse::<i32>().ok()),
+                    storage::read_setting(app, "overlay_y")
+                        .ok()
+                        .flatten()
+                        .and_then(|s| s.parse::<i32>().ok()),
+                ) {
                     if let Ok(monitors) = window.available_monitors() {
-                        if monitors.iter().any(|m| x >= m.position().x && y >= m.position().y && x + size.width as i32 <= m.position().x + m.size().width as i32 && y + size.height as i32 <= m.position().y + m.size().height as i32) {
-                            let _ = window.set_position(PhysicalPosition::new(x,y));
+                        if monitors.iter().any(|m| {
+                            x >= m.position().x
+                                && y >= m.position().y
+                                && x + size.width as i32 <= m.position().x + m.size().width as i32
+                                && y + size.height as i32 <= m.position().y + m.size().height as i32
+                        }) {
+                            let _ = window.set_position(PhysicalPosition::new(x, y));
                         }
                     }
                 }
             }
         }
     }
-    let hold = storage::read_setting(app,"push_to_talk").ok().flatten().as_deref() == Some("true");
-    let _ = app.emit("overlay://config", OverlayConfig {hold});
+    let hold = storage::read_setting(app, "push_to_talk")
+        .ok()
+        .flatten()
+        .as_deref()
+        == Some("true");
+    let _ = app.emit("overlay://config", OverlayConfig { hold });
     window
         .show()
         .map_err(|error| format!("No se pudo mostrar el indicador visual de grabación: {error}"))?;
@@ -119,17 +145,28 @@ fn show_overlay(app: &AppHandle, target: Option<DeliveryTarget>) -> Result<(), S
 }
 
 #[derive(Clone, Serialize)]
-struct OverlayConfig { hold: bool }
+struct OverlayConfig {
+    hold: bool,
+}
 
 #[tauri::command]
 pub fn overlay_drag(window: tauri::WebviewWindow) -> Result<(), String> {
-    if window.label() != "overlay" { return Err("Ventana no válida".into()); }
-    window.start_dragging().map_err(|e|e.to_string())
+    if window.label() != "overlay" {
+        return Err("Ventana no válida".into());
+    }
+    window.start_dragging().map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub fn dictation_status(last_audio: State<'_, LastAudioState>) -> bool {
-    last_audio.0.lock().map(|a|a.is_some()).unwrap_or(false)
+    last_audio.0.lock().map(|a| a.is_some()).unwrap_or(false)
+}
+
+#[tauri::command]
+pub fn dictation_forget_audio(last_audio: State<'_, LastAudioState>) {
+    if let Ok(mut audio) = last_audio.0.lock() {
+        *audio = None;
+    }
 }
 
 #[tauri::command]
@@ -138,7 +175,24 @@ pub fn dictation_last_result(last_result: State<'_, LastResultState>) -> Option<
 }
 
 #[tauri::command]
-pub fn transcription_cancel() { SESSION_CANCELLED.store(true,Ordering::Release); transcription::cancel(); }
+pub fn transcription_cancel() {
+    SESSION_CANCELLED.store(true, Ordering::Release);
+    transcription::cancel();
+}
+
+pub fn request_shutdown(state: &DictationState) {
+    SESSION_CANCELLED.store(true, Ordering::Release);
+    transcription::cancel();
+    crate::learning::stop();
+    if let Ok(mut session) = state.0.lock() {
+        if let Some(active) = session.as_mut() {
+            active.stop.store(true, Ordering::Release);
+        }
+        // Dropping the session terminates preload/streaming workers and the
+        // focus tracker. The capture worker observes `stop` above.
+        session.take();
+    }
+}
 
 pub(crate) fn hide_overlay(app: &AppHandle) {
     OVERLAY_GENERATION.fetch_add(1, Ordering::AcqRel);
@@ -165,6 +219,7 @@ fn show_overlay_error(app: &AppHandle, message: &'static str) {
 pub async fn dictation_start(
     app: AppHandle,
     state: State<'_, DictationState>,
+    last_audio: State<'_, LastAudioState>,
     device_id: Option<String>,
     delivery_requested: bool,
     language: String,
@@ -172,8 +227,14 @@ pub async fn dictation_start(
     if !matches!(language.as_str(), "auto" | "es" | "en") {
         return Err("El idioma seleccionado no es válido".into());
     }
+    crate::diagnostics::ensure_transcription_capacity(&app)?;
     crate::learning::stop();
-    SESSION_CANCELLED.store(false,Ordering::Release);
+    if storage::read_setting(&app, "private_mode")?.as_deref() == Some("true") {
+        if let Ok(mut stored) = last_audio.0.lock() {
+            *stored = None;
+        }
+    }
+    SESSION_CANCELLED.store(false, Ordering::Release);
     let engine = transcription::selected_engine(&app)?;
     if engine == TranscriptionEngine::ParakeetUltra {
         transcription::verify_parakeet_resources(&app)?;
@@ -194,10 +255,14 @@ pub async fn dictation_start(
         let worker_app = app.clone();
         let prefetch = if engine == TranscriptionEngine::Whisper {
             streaming::StreamSession::start(app.clone(), language.clone()).ok()
-        } else { None };
+        } else {
+            None
+        };
         let parakeet_preload = if engine == TranscriptionEngine::ParakeetUltra {
             transcription::ParakeetPreload::start(&app).ok()
-        } else { None };
+        } else {
+            None
+        };
         let prefetch_sink = prefetch.as_ref().map(streaming::StreamSession::sink);
         let (ready_tx, ready_rx) = mpsc::sync_channel::<Result<(), String>>(1);
         let ready_error = ready_tx.clone();
@@ -237,14 +302,21 @@ pub async fn dictation_start(
     match startup {
         Ok(Ok(())) => {
             if delivery_requested {
-                let overlay_target = state.0.lock().ok().and_then(|slot|
-                    slot.as_ref().and_then(|session| session.target_tracker.as_ref().and_then(delivery::TargetTracker::latest)));
+                let overlay_target = state.0.lock().ok().and_then(|slot| {
+                    slot.as_ref().and_then(|session| {
+                        session
+                            .target_tracker
+                            .as_ref()
+                            .and_then(delivery::TargetTracker::latest)
+                    })
+                });
                 if let Err(error) = show_overlay(&app, overlay_target) {
                     if let Ok(session) = take_session(&state) {
                         session.stop.store(true, Ordering::Release);
                         let _ = session.task.await;
                         if let Some(prefetch) = session.prefetch {
-                            let _ = tauri::async_runtime::spawn_blocking(move || prefetch.cancel()).await;
+                            let _ = tauri::async_runtime::spawn_blocking(move || prefetch.cancel())
+                                .await;
                         }
                     }
                     return Err(error);
@@ -288,12 +360,16 @@ pub async fn dictation_stop(
     let auto_insert = session.auto_insert;
     let session_language = session.language;
     let engine = session.engine;
-    let prefetched_segments = session.prefetch.as_ref().map(streaming::StreamSession::completed_before_stop).unwrap_or(0);
+    let prefetched_segments = session
+        .prefetch
+        .as_ref()
+        .map(streaming::StreamSession::completed_before_stop)
+        .unwrap_or(0);
     let prefetch = session.prefetch;
     let parakeet_preload = session.parakeet_preload;
     let released_at = Instant::now();
     let _ = app.emit("dictation://state", "processing");
-    let result: Result<DictationResult,String> = async {
+    let result: Result<DictationResult, String> = async {
         session.stop.store(true, Ordering::Release);
         let captured = session
             .task
@@ -302,7 +378,11 @@ pub async fn dictation_stop(
         let captured_seconds = captured.samples.len() as f64 / 16_000.0;
         let dropped_chunks = captured.result.dropped_chunks;
         if let Ok(mut stored) = last_audio.0.lock() {
-            *stored = Some(captured.samples.clone());
+            *stored = if storage::read_setting(&app, "private_mode")?.as_deref() == Some("true") {
+                None
+            } else {
+                Some(captured.samples.clone())
+            };
         }
         let worker_app = app.clone();
         let (transcript, dictionary_changes, dictionary_warning, delivery, streaming_used) =
@@ -311,24 +391,68 @@ pub async fn dictation_stop(
                     Some(prefetch) if session_language == language => {
                         match prefetch.finish(captured.result.input_frames) {
                             Ok(streamed) => match transcription::result_from_raw(
-                                &worker_app, &streamed.raw_text, &language, captured_seconds, streamed.engine_ms,
+                                &worker_app,
+                                &streamed.raw_text,
+                                &language,
+                                captured_seconds,
+                                streamed.engine_ms,
                             ) {
                                 Ok(result) => (result, true),
-                                Err(_) => (transcription::transcribe_pcm_with_engine(&worker_app, &captured.samples, &language, engine)?, false),
+                                Err(_) => (
+                                    transcription::transcribe_pcm_with_engine(
+                                        &worker_app,
+                                        &captured.samples,
+                                        &language,
+                                        engine,
+                                    )?,
+                                    false,
+                                ),
                             },
-                            Err(_) => (transcription::transcribe_pcm_with_engine(&worker_app, &captured.samples, &language, engine)?, false),
+                            Err(_) => (
+                                transcription::transcribe_pcm_with_engine(
+                                    &worker_app,
+                                    &captured.samples,
+                                    &language,
+                                    engine,
+                                )?,
+                                false,
+                            ),
                         }
                     }
                     Some(prefetch) => {
                         prefetch.cancel();
-                        (transcription::transcribe_pcm_with_engine(&worker_app, &captured.samples, &language, engine)?, false)
+                        (
+                            transcription::transcribe_pcm_with_engine(
+                                &worker_app,
+                                &captured.samples,
+                                &language,
+                                engine,
+                            )?,
+                            false,
+                        )
                     }
                     None if engine == TranscriptionEngine::ParakeetUltra => (
-                        transcription::transcribe_pcm_with_preload(&worker_app, &captured.samples, &language, parakeet_preload)?, false
+                        transcription::transcribe_pcm_with_preload(
+                            &worker_app,
+                            &captured.samples,
+                            &language,
+                            parakeet_preload,
+                        )?,
+                        false,
                     ),
-                    None => (transcription::transcribe_pcm_with_engine(&worker_app, &captured.samples, &language, engine)?, false),
+                    None => (
+                        transcription::transcribe_pcm_with_engine(
+                            &worker_app,
+                            &captured.samples,
+                            &language,
+                            engine,
+                        )?,
+                        false,
+                    ),
                 };
-                if SESSION_CANCELLED.load(Ordering::Acquire){return Err("Dictado cancelado".into());}
+                if SESSION_CANCELLED.load(Ordering::Acquire) {
+                    return Err("Dictado cancelado".into());
+                }
                 let mut changes = 0;
                 let warning = match storage::apply_dictionary(&worker_app, &transcript.text) {
                     Ok(preview) => {
@@ -340,20 +464,35 @@ pub async fn dictation_stop(
                         "El texto se obtuvo, pero no se pudo aplicar el diccionario: {error}"
                     )),
                 };
-                if SESSION_CANCELLED.load(Ordering::Acquire) { return Err("Dictado cancelado".into()); }
-                if indicator_visible { let _ = worker_app.emit("dictation://state", "completing"); }
-                if SESSION_CANCELLED.load(Ordering::Acquire) { return Err("Dictado cancelado".into()); }
-                let delivery_target = target_tracker.as_ref().and_then(delivery::TargetTracker::snapshot);
+                if SESSION_CANCELLED.load(Ordering::Acquire) {
+                    return Err("Dictado cancelado".into());
+                }
+                if indicator_visible {
+                    let _ = worker_app.emit("dictation://state", "completing");
+                }
+                if SESSION_CANCELLED.load(Ordering::Acquire) {
+                    return Err("Dictado cancelado".into());
+                }
+                let delivery_target = target_tracker
+                    .as_ref()
+                    .and_then(delivery::TargetTracker::snapshot);
                 let delivery = if auto_insert {
                     let mut delivered_text = transcript.text.clone();
-                    if storage::read_setting(&worker_app, "append_trailing_space")?
-                        .as_deref()
+                    if storage::read_setting(&worker_app, "append_trailing_space")?.as_deref()
                         != Some("false")
                     {
                         delivered_text.push(' ');
                     }
-                    let status = delivery::deliver(target_tracker.as_ref(), delivery_target, &delivered_text);
-                    if status.sent { if let Some(pid)=delivery::process_id(delivery_target) { crate::learning::observe(&worker_app,pid,&delivered_text); } }
+                    let status = delivery::deliver(
+                        target_tracker.as_ref(),
+                        delivery_target,
+                        &delivered_text,
+                    );
+                    if status.sent {
+                        if let Some(pid) = delivery::process_id(delivery_target) {
+                            crate::learning::observe(&worker_app, pid, &delivered_text);
+                        }
+                    }
                     status
                 } else {
                     delivery::skipped()
@@ -380,24 +519,43 @@ pub async fn dictation_stop(
     }
     .await;
     if let Ok(completed) = &result {
-        if let Ok(mut slot) = last_result.0.lock() { *slot = Some(completed.clone()); }
+        if let Ok(mut slot) = last_result.0.lock() {
+            *slot = Some(completed.clone());
+        }
     }
     match &result {
         Ok(r) if auto_insert && !r.delivery.sent => {
-            if indicator_visible { show_overlay_error(&app, "No se pudo insertar"); }
-            else { hide_overlay(&app); let _ = app.emit("dictation://state", "idle"); }
-            crate::notice::show(&app,r.delivery.reason.as_deref().unwrap_or("No se pudo entregar. Copia el texto desde Inicio."));
-        },
-        Ok(_) => { hide_overlay(&app); let _ = app.emit("dictation://state", "idle"); },
+            if indicator_visible {
+                show_overlay_error(&app, "No se pudo insertar");
+            } else {
+                hide_overlay(&app);
+                let _ = app.emit("dictation://state", "idle");
+            }
+            crate::notice::show(
+                &app,
+                r.delivery
+                    .reason
+                    .as_deref()
+                    .unwrap_or("No se pudo entregar. Copia el texto desde Inicio."),
+            );
+        }
+        Ok(_) => {
+            hide_overlay(&app);
+            let _ = app.emit("dictation://state", "idle");
+        }
         Err(e) if e == "Dictado cancelado" || e == "Transcripción cancelada" => {
             hide_overlay(&app);
             let _ = app.emit("dictation://state", "idle");
-        },
+        }
         Err(e) => {
-            if indicator_visible { show_overlay_error(&app, "Falló la transcripción"); }
-            else { hide_overlay(&app); let _ = app.emit("dictation://state", "idle"); }
-            crate::notice::show(&app,e);
-        },
+            if indicator_visible {
+                show_overlay_error(&app, "Falló la transcripción");
+            } else {
+                hide_overlay(&app);
+                let _ = app.emit("dictation://state", "idle");
+            }
+            crate::notice::show(&app, e);
+        }
     }
     result
 }
@@ -409,7 +567,11 @@ pub async fn dictation_reprocess(
     last_result: State<'_, LastResultState>,
     language: String,
 ) -> Result<DictationResult, String> {
-    SESSION_CANCELLED.store(false,Ordering::Release);
+    if storage::read_setting(&app, "private_mode")?.as_deref() == Some("true") {
+        return Err("El modo privado no conserva audio para reprocesarlo".into());
+    }
+    crate::diagnostics::ensure_transcription_capacity(&app)?;
+    SESSION_CANCELLED.store(false, Ordering::Release);
     if !matches!(language.as_str(), "auto" | "es" | "en") {
         return Err("El idioma seleccionado no es válido".into());
     }
@@ -418,7 +580,10 @@ pub async fn dictation_reprocess(
         .lock()
         .map_err(|_| "No se pudo acceder a la última grabación".to_string())?
         .clone()
-        .ok_or_else(|| {crate::notice::show(&app,"Todavía no hay una grabación para reprocesar"); "Todavía no hay una grabación para reprocesar".to_string()})?;
+        .ok_or_else(|| {
+            crate::notice::show(&app, "Todavía no hay una grabación para reprocesar");
+            "Todavía no hay una grabación para reprocesar".to_string()
+        })?;
     let _ = app.emit("dictation://state", "processing");
     let released_at = Instant::now();
     let worker_app = app.clone();
@@ -432,7 +597,9 @@ pub async fn dictation_reprocess(
                 dictionary_changes = preview.changes;
                 None
             }
-            Err(error) => Some(format!("El texto se obtuvo, pero no se pudo aplicar el diccionario: {error}")),
+            Err(error) => Some(format!(
+                "El texto se obtuvo, pero no se pudo aplicar el diccionario: {error}"
+            )),
         };
         Ok::<_, String>(DictationResult {
             transcript,
@@ -447,12 +614,17 @@ pub async fn dictation_reprocess(
         })
     })
     .await
-    .map_err(|error| format!("El reprocesamiento terminó inesperadamente: {error}")).and_then(|result|result);
+    .map_err(|error| format!("El reprocesamiento terminó inesperadamente: {error}"))
+    .and_then(|result| result);
     let _ = app.emit("dictation://state", "idle");
     if let Ok(completed) = &result {
-        if let Ok(mut slot) = last_result.0.lock() { *slot = Some(completed.clone()); }
+        if let Ok(mut slot) = last_result.0.lock() {
+            *slot = Some(completed.clone());
+        }
     }
-    if let Err(error)=&result{crate::notice::show(&app,error);}
+    if let Err(error) = &result {
+        crate::notice::show(&app, error);
+    }
     result
 }
 
@@ -470,9 +642,16 @@ pub async fn dictation_cancel(
         let _ = tauri::async_runtime::spawn_blocking(move || prefetch.cancel()).await;
     }
     if show_error.unwrap_or(false) {
-        if indicator_visible { show_overlay_error(&app, "Error de grabación"); }
-        else { hide_overlay(&app); let _ = app.emit("dictation://state", "idle"); }
-        crate::notice::show(&app,"No se pudo grabar. Revisa el micrófono y vuelve a intentar.");
+        if indicator_visible {
+            show_overlay_error(&app, "Error de grabación");
+        } else {
+            hide_overlay(&app);
+            let _ = app.emit("dictation://state", "idle");
+        }
+        crate::notice::show(
+            &app,
+            "No se pudo grabar. Revisa el micrófono y vuelve a intentar.",
+        );
     } else {
         hide_overlay(&app);
         let _ = app.emit("dictation://state", "idle");

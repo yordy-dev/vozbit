@@ -1,10 +1,12 @@
 //! Anticipatory transcription. Audio is never inserted until the shortcut is released.
 //! A short-lived loopback worker keeps one Whisper model loaded for this dictation.
-use crate::{resample, transcription};
 use crate::streaming_core::{pcm_wav, rms, AudioChunk, SegmentPlanner};
+use crate::{resample, transcription};
 use reqwest::blocking::{multipart, Client};
 use serde::Deserialize;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener, TcpStream};
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::mpsc::{self, Receiver, SyncSender, TrySendError};
@@ -12,8 +14,6 @@ use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Manager};
-#[cfg(windows)]
-use std::os::windows::process::CommandExt;
 
 const SERVER_SHA256: &str = "a97456e747f28e7bb09c1dac35f40d94404c5ecffa74aaaaa7a3753ea6543121";
 const BLOCK_MILLIS: usize = 500;
@@ -40,10 +40,12 @@ impl AudioStreamSink {
         let block = (sample_rate as usize * BLOCK_MILLIS / 1_000).max(1);
         while self.pending.len() >= block {
             let chunk = self.pending.drain(..block).collect();
-            if let Err(TrySendError::Full(_) | TrySendError::Disconnected(_)) = self.sender.try_send(AudioChunk {
-                sample_rate,
-                samples: chunk,
-            }) {
+            if let Err(TrySendError::Full(_) | TrySendError::Disconnected(_)) =
+                self.sender.try_send(AudioChunk {
+                    sample_rate,
+                    samples: chunk,
+                })
+            {
                 self.overflow.store(true, Ordering::Release);
                 return;
             }
@@ -78,14 +80,24 @@ impl ServerControl {
     }
 
     fn exited(&self) -> bool {
-        self.0.lock().ok().and_then(|mut guard| guard.as_mut().and_then(|child| child.try_wait().ok().flatten())).is_some()
+        self.0
+            .lock()
+            .ok()
+            .and_then(|mut guard| {
+                guard
+                    .as_mut()
+                    .and_then(|child| child.try_wait().ok().flatten())
+            })
+            .is_some()
     }
 }
 
 struct ServerLifetime(ServerControl);
 
 impl Drop for ServerLifetime {
-    fn drop(&mut self) { self.0.stop(); }
+    fn drop(&mut self) {
+        self.0.stop();
+    }
 }
 
 pub(crate) struct StreamSession {
@@ -114,9 +126,25 @@ impl StreamSession {
         let worker_prefetched = prefetched.clone();
         let worker = thread::Builder::new()
             .name("voicetext-anticipatory-asr".into())
-            .spawn(move || run(app, language, receiver, worker_abort, worker_control, worker_prefetched))
+            .spawn(move || {
+                run(
+                    app,
+                    language,
+                    receiver,
+                    worker_abort,
+                    worker_control,
+                    worker_prefetched,
+                )
+            })
             .map_err(|error| format!("No se pudo iniciar el procesamiento anticipado: {error}"))?;
-        Ok(Self { sender: Some(sender), worker: Some(worker), overflow, aborted, control, prefetched })
+        Ok(Self {
+            sender: Some(sender),
+            worker: Some(worker),
+            overflow,
+            aborted,
+            control,
+            prefetched,
+        })
     }
 
     pub(crate) fn sink(&self) -> AudioStreamSink {
@@ -138,15 +166,21 @@ impl StreamSession {
             self.aborted.store(true, Ordering::Release);
             self.control.stop();
         }
-        let result = self.worker.take().ok_or("No se encontró el procesamiento anticipado")?
-            .join().map_err(|_| "El procesamiento anticipado terminó inesperadamente".to_string())?;
+        let result = self
+            .worker
+            .take()
+            .ok_or("No se encontró el procesamiento anticipado")?
+            .join()
+            .map_err(|_| "El procesamiento anticipado terminó inesperadamente".to_string())?;
         self.control.stop();
         if self.overflow.load(Ordering::Acquire) {
             return Err("Se saturó la vista previa del audio; se usará el audio completo".into());
         }
         let result = result?;
         if result.1 != expected_frames {
-            return Err("La vista previa no contiene todas las muestras; se usará el audio completo".into());
+            return Err(
+                "La vista previa no contiene todas las muestras; se usará el audio completo".into(),
+            );
         }
         Ok(result.0)
     }
@@ -179,7 +213,10 @@ fn run(
 ) -> Result<(StreamResult, usize), String> {
     let (port, prefix) = start_server(&app, &language, &aborted, &control)?;
     let _server_lifetime = ServerLifetime(control.clone());
-    let client = Client::builder().no_proxy().timeout(Duration::from_secs(90)).build()
+    let client = Client::builder()
+        .no_proxy()
+        .timeout(Duration::from_secs(90))
+        .build()
         .map_err(|error| format!("No se pudo preparar el cliente local: {error}"))?;
     let url = format!("http://127.0.0.1:{port}{prefix}/inference");
     let prompt = transcription::initial_prompt(&app, &language);
@@ -193,7 +230,14 @@ fn run(
         }
         frames += chunk.samples.len();
         if let Some(segment) = planner.push(chunk)? {
-            let (text, ms) = transcribe_segment(&client, &url, &language, &prompt, &segment, planner.sample_rate)?;
+            let (text, ms) = transcribe_segment(
+                &client,
+                &url,
+                &language,
+                &prompt,
+                &segment,
+                planner.sample_rate,
+            )?;
             if !text.is_empty() {
                 texts.push(text);
             }
@@ -205,22 +249,38 @@ fn run(
         return Err("Procesamiento anticipado cancelado".into());
     }
     if let Some(tail) = planner.finish() {
-        let (text, ms) = transcribe_segment(&client, &url, &language, &prompt, &tail, planner.sample_rate)?;
+        let (text, ms) = transcribe_segment(
+            &client,
+            &url,
+            &language,
+            &prompt,
+            &tail,
+            planner.sample_rate,
+        )?;
         if !text.is_empty() {
             texts.push(text);
         }
         engine_ms += ms;
     }
-    let raw_text = texts.join(" ").split_whitespace().collect::<Vec<_>>().join(" ");
+    let raw_text = texts
+        .join(" ")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
     if raw_text.is_empty() {
         return Err("El servidor local no reconoció voz; se usará el audio completo".into());
     }
-    let result = StreamResult { raw_text, engine_ms };
+    let result = StreamResult {
+        raw_text,
+        engine_ms,
+    };
     Ok((result, frames))
 }
 
 #[derive(Deserialize)]
-struct InferenceResponse { text: String }
+struct InferenceResponse {
+    text: String,
+}
 
 fn transcribe_segment(
     client: &Client,
@@ -235,22 +295,30 @@ fn transcribe_segment(
         return Ok((String::new(), 0));
     }
     let wav = pcm_wav(&samples)?;
-    let part = multipart::Part::bytes(wav).file_name("segment.wav")
-        .mime_str("audio/wav").map_err(|error| error.to_string())?;
+    let part = multipart::Part::bytes(wav)
+        .file_name("segment.wav")
+        .mime_str("audio/wav")
+        .map_err(|error| error.to_string())?;
     let form = multipart::Form::new()
         .text("language", language.to_string())
         .text("response_format", "json")
         .text("prompt", prompt.to_string())
         .part("file", part);
     let started = Instant::now();
-    let response = client.post(url).multipart(form).send()
+    let response = client
+        .post(url)
+        .multipart(form)
+        .send()
         .and_then(|response| response.error_for_status())
         .map_err(|error| format!("Falló el motor local de fragmentos: {error}"))?;
-    let body: InferenceResponse = response.json()
+    let body: InferenceResponse = response
+        .json()
         .map_err(|error| format!("El motor local devolvió una respuesta inválida: {error}"))?;
     let text = body.text.split_whitespace().collect::<Vec<_>>().join(" ");
     if text.is_empty() && rms(&samples) >= 0.005 {
-        return Err("El motor local omitió un fragmento con voz; se usará el audio completo".into());
+        return Err(
+            "El motor local omitió un fragmento con voz; se usará el audio completo".into(),
+        );
     }
     Ok((text, started.elapsed().as_millis()))
 }
@@ -263,33 +331,63 @@ fn start_server(
 ) -> Result<(u16, String), String> {
     use tauri::path::BaseDirectory;
     let (model, vad) = transcription::verified_model_vad(app)?;
-    let executable = app.path().resolve("resources/whisper/whisper-server.exe", BaseDirectory::Resource)
+    let executable = app
+        .path()
+        .resolve(
+            "resources/whisper/whisper-server.exe",
+            BaseDirectory::Resource,
+        )
         .map_err(|error| error.to_string())?;
     if transcription::sha256(&executable)? != SERVER_SHA256 {
         return Err("El servidor local no pasó la comprobación de integridad".into());
     }
     let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
         .map_err(|error| format!("No se pudo reservar un puerto local: {error}"))?;
-    let port = listener.local_addr().map_err(|error| error.to_string())?.port();
+    let port = listener
+        .local_addr()
+        .map_err(|error| error.to_string())?
+        .port();
     drop(listener);
-    let nonce = SystemTime::now().duration_since(UNIX_EPOCH)
-        .map_err(|error| error.to_string())?.as_nanos();
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|error| error.to_string())?
+        .as_nanos();
     let prefix = format!("/vt-{}-{nonce}", std::process::id());
     let mut command = Command::new(&executable);
-    command.current_dir(executable.parent().ok_or("Ruta del servidor inválida")?)
+    command
+        .current_dir(executable.parent().ok_or("Ruta del servidor inválida")?)
         .args(["-m", model.to_str().ok_or("Ruta de modelo inválida")?])
         .args(["-l", language, "-ng", "-sns", "-nt", "-bs", "5", "-bo", "5"])
         .args(["--vad", "-vm", vad.to_str().ok_or("Ruta de VAD inválida")?])
-        .args(["--host", "127.0.0.1", "--port", &port.to_string(), "--request-path", &prefix])
-        .stdout(Stdio::null()).stderr(Stdio::null());
+        .args([
+            "--host",
+            "127.0.0.1",
+            "--port",
+            &port.to_string(),
+            "--request-path",
+            &prefix,
+        ])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
     #[cfg(windows)]
     command.creation_flags(0x08000000);
-    let child = command.spawn().map_err(|error| format!("No se pudo iniciar el servidor local: {error}"))?;
-    *control.0.lock().map_err(|_| "No se pudo supervisar el servidor local")? = Some(child);
+    let child = command
+        .spawn()
+        .map_err(|error| format!("No se pudo iniciar el servidor local: {error}"))?;
+    *control
+        .0
+        .lock()
+        .map_err(|_| "No se pudo supervisar el servidor local")? = Some(child);
     let address = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port);
     for _ in 0..100 {
-        if aborted.load(Ordering::Acquire) { control.stop(); return Err("Dictado cancelado".into()); }
-        if control.exited() { control.stop(); return Err("El servidor local terminó al iniciar".into()); }
+        if aborted.load(Ordering::Acquire) {
+            control.stop();
+            return Err("Dictado cancelado".into());
+        }
+        if control.exited() {
+            control.stop();
+            return Err("El servidor local terminó al iniciar".into());
+        }
         if TcpStream::connect_timeout(&address, Duration::from_millis(50)).is_ok() {
             return Ok((port, prefix));
         }
@@ -298,4 +396,3 @@ fn start_server(
     control.stop();
     Err("El servidor local no respondió en cinco segundos".into())
 }
-

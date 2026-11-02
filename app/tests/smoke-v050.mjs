@@ -1,7 +1,11 @@
 // Prueba de solo lectura contra la WebView nativa con depuración remota habilitada.
 const port = process.argv[2] ?? "9450";
 const pages = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json();
-const main = pages.find(page => page.url === "http://tauri.localhost/");
+const main = pages.find(page => [
+  "http://tauri.localhost/",
+  "http://localhost:5173/",
+  "http://127.0.0.1:5173/",
+].includes(page.url));
 if (!main) throw Error("No se encontró la ventana principal");
 const socket = new WebSocket(main.webSocketDebuggerUrl);
 await new Promise((resolve, reject) => {
@@ -26,7 +30,10 @@ function send(method, params = {}) {
 }
 async function evaluate(expression) {
   const response = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true });
-  if (response.exceptionDetails) throw Error(response.exceptionDetails.text);
+  if (response.exceptionDetails) {
+    const detail = response.exceptionDetails.exception?.description ?? response.exceptionDetails.text;
+    throw Error(detail);
+  }
   return response.result.value;
 }
 function assert(condition, message) { if (!condition) throw Error(message); }

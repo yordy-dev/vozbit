@@ -56,7 +56,7 @@ export interface DictationResult {
   dropped_chunks: number;
   dictionary_changes: number;
   dictionary_warning: string | null;
-  delivery: { sent: boolean; reason: string | null };
+  delivery: { sent: boolean; reason: string | null; code: string | null };
   post_release_ms: number;
   prefetched_segments: number;
   streaming_used: boolean;
@@ -89,6 +89,26 @@ export interface DictionaryPreview {
   changes: number;
 }
 
+export interface DiagnosticReport {
+  app_version: string;
+  architecture: string;
+  os_version: string;
+  logical_processors: number;
+  total_memory_bytes: number;
+  available_memory_bytes: number;
+  data_available_space_bytes: number | null;
+  cache_available_space_bytes: number | null;
+  cpu_features: string[];
+  stale_files_removed: number;
+  checks: Array<{ id: string; status: "ok" | "warning" | "error"; detail: string }>;
+}
+
+export interface BackupResult {
+  path: string;
+  history_entries: number;
+  dictionary_entries: number;
+}
+
 export interface AppSettings {
   tutorial_version: number;
   learn_corrections: boolean;
@@ -97,6 +117,7 @@ export interface AppSettings {
   preferred_device_id: string;
   auto_insert: boolean;
   auto_save: boolean;
+  private_mode: boolean;
   append_trailing_space: boolean;
   text_correction: boolean;
   format_numbers: boolean;

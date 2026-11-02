@@ -1,6 +1,6 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import type { AppSettings, AudioDevice, AudioTestResult, DictionaryEntry, DictionaryPreview, DictationResult, HistoryItem, MicLevel, ModelStatus, ShortcutStatus, TranscriptionResult } from "./types";
+import type { AppSettings, AudioDevice, AudioTestResult, BackupResult, DiagnosticReport, DictionaryEntry, DictionaryPreview, DictationResult, HistoryItem, MicLevel, ModelStatus, ShortcutStatus, TranscriptionResult } from "./types";
 
 export const inDesktop = isTauri();
 
@@ -47,6 +47,10 @@ export async function getLastDictation(): Promise<DictationResult | null> {
   return invoke<DictationResult | null>("dictation_last_result");
 }
 
+export async function forgetLastAudio(): Promise<void> {
+  return invoke<void>("dictation_forget_audio");
+}
+
 export async function listenDictationError(handler: (message: string) => void): Promise<UnlistenFn> {
   return listen<string>("dictation://error", (event) => handler(event.payload));
 }
@@ -69,6 +73,22 @@ export async function setHistoryFavorite(id: number, favorite: boolean): Promise
 
 export async function deleteHistory(id: number): Promise<void> {
   return invoke<void>("history_delete", { id });
+}
+
+export async function clearHistory(includeFavorites: boolean): Promise<number> {
+  return invoke<number>("history_clear", { includeFavorites });
+}
+
+export async function runDiagnostics(): Promise<DiagnosticReport> {
+  return invoke<DiagnosticReport>("diagnostics_run");
+}
+
+export async function exportDiagnostics(): Promise<string> {
+  return invoke<string>("diagnostics_export");
+}
+
+export async function createDataBackup(): Promise<BackupResult> {
+  return invoke<BackupResult>("data_backup_create");
 }
 
 export async function getShortcutStatus(): Promise<ShortcutStatus> {
