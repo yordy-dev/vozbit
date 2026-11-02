@@ -3,6 +3,9 @@
 
 # Historical/private working notes. Publish only the curated README media.
 /docs/*
+!/docs/36_CIERRE_ESCENARIOS_Y_ENTREGA_V0.5.9.md
+!/docs/37_MATRIZ_COBERTURA_500_V0.5.9.md
+!/docs/38_LISTA_DE_PROBLEMAS_SOLUCIONADOS_V0.5.9.md
 !/docs/images/
 /docs/images/*
 !/docs/images/01-inicio.png
