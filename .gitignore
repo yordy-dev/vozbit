@@ -6,6 +6,14 @@
 !/docs/36_CIERRE_ESCENARIOS_Y_ENTREGA_V0.5.9.md
 !/docs/37_MATRIZ_COBERTURA_500_V0.5.9.md
 !/docs/38_LISTA_DE_PROBLEMAS_SOLUCIONADOS_V0.5.9.md
+!/docs/43_IMPLEMENTACION_APRENDIZAJE_LOCAL_V0.5.10.md
+!/docs/44_REDISENO_FLUENT_2_UI.md
+!/docs/45_IMPLEMENTACION_FLUENT_2_UI_V0.5.10.md
+!/docs/reviews/
+/docs/reviews/*
+!/docs/reviews/fluent2/
+/docs/reviews/fluent2/*
+!/docs/reviews/fluent2/consolidated_review_report.md
 !/docs/images/
 /docs/images/*
 !/docs/images/01-inicio.png

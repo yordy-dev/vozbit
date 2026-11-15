@@ -11,8 +11,8 @@ use std::{
     time::{Duration, Instant},
 };
 use tauri::{AppHandle, Emitter, Manager};
-const OBSERVE_SHA256: &str = "d2eea7821c0bead905482000e22c01009360884c12c77525487ac44c1e9a1e01";
-const DIFF_SHA256: &str = "8382cbc3b945d03fd40a73b04430b668afc07eab542a15e48840a904e554c561";
+const OBSERVE_SHA256: &str = "d368d6efb81fe54d9a64d4d0a4fd1ddc43f5a660bcdbc715bbee320af800c408";
+const DIFF_SHA256: &str = "8b00158683e9749e51619e263bed62f4aa4d954bebd6701b80f64921c17f5cd4";
 const OBSERVATION_LIMIT: Duration = Duration::from_secs(30);
 static GENERATION: AtomicU64 = AtomicU64::new(0);
 pub fn stop() {
@@ -122,8 +122,8 @@ fn launch(app: &AppHandle, pid: u32, text: &str, selection: bool) {
         let mut observed = 0_usize;
         loop {
             while let Ok(line) = receiver.try_recv() {
-                if observed < 20 && apply_candidate(&app, &line, selection, observed == 0) {
-                    observed += 1;
+                if observed < 20 {
+                    observed += apply_observation(&app, &line, selection);
                 }
             }
             if GENERATION.load(Ordering::Relaxed) != generation
@@ -148,8 +148,8 @@ fn launch(app: &AppHandle, pid: u32, text: &str, selection: bool) {
         let _ = child.wait();
         let _ = reader.join();
         while let Ok(line) = receiver.try_recv() {
-            if observed < 20 && apply_candidate(&app, &line, selection, observed == 0) {
-                observed += 1;
+            if observed < 20 {
+                observed += apply_observation(&app, &line, selection);
             }
         }
         if selection && observed == 0 {
@@ -160,17 +160,28 @@ fn launch(app: &AppHandle, pid: u32, text: &str, selection: bool) {
         }
     });
 }
-#[derive(serde::Deserialize)]
+#[derive(Clone, serde::Deserialize)]
 struct Candidate {
     term: String,
     replacement: String,
+    context_term: Option<String>,
+    context_replacement: Option<String>,
 }
 
-fn apply_candidate(app: &AppHandle, line: &str, selection: bool, notify: bool) -> bool {
-    let Ok(candidate) = serde_json::from_str::<Candidate>(line) else {
-        return false;
-    };
+#[derive(serde::Deserialize)]
+struct ObservationBatch {
+    #[serde(rename = "original")]
+    _original: String,
+    #[serde(rename = "edited")]
+    _edited: String,
+    candidates: Vec<Candidate>,
+}
+
+fn apply_observation(app: &AppHandle, line: &str, selection: bool) -> usize {
     if selection {
+        let Ok(candidate) = serde_json::from_str::<Candidate>(line) else {
+            return 0;
+        };
         let result = tauri::async_runtime::block_on(storage::dictionary_upsert(
             app.clone(),
             candidate.term,
@@ -185,21 +196,90 @@ fn apply_candidate(app: &AppHandle, line: &str, selection: bool, notify: bool) -
                 "Selecciona una palabra o expresión de hasta 80 caracteres",
             );
         }
-        return result.is_ok();
+        return usize::from(result.is_ok());
     }
-    if let Ok(learned) = storage::save_suggestion(app, &candidate.term, &candidate.replacement) {
-        let _ = app.emit("learning://updated", ());
-        if notify {
-            crate::notice::show(
-                app,
-                if learned {
-                    "Corrección aprendida. Puedes editarla o deshacerla en Diccionario."
-                } else {
-                    "Corrección detectada. Revísala en Diccionario."
-                },
-            );
+
+    let Ok(batch) = serde_json::from_str::<ObservationBatch>(line) else {
+        return 0;
+    };
+    let mut learned = Vec::new();
+    let mut reviewed = 0;
+    for candidate in batch.candidates.iter().take(20) {
+        if locally_learnable(candidate) {
+            if storage::save_auto_learned_word(app, &candidate.term, &candidate.replacement).is_ok()
+            {
+                learned.push(candidate.replacement.clone());
+            }
+        } else {
+            let _ =
+                storage::queue_learning_suggestion(app, &candidate.term, &candidate.replacement);
         }
-        return true;
+        reviewed += 1;
     }
-    false
+    if reviewed > 0 {
+        let _ = app.emit("learning://updated", ());
+    }
+    if !learned.is_empty() {
+        let message = if learned.len() == 1 {
+            format!(
+                "Palabra aprendida: «{}». Puedes deshacerla en Diccionario.",
+                learned[0]
+            )
+        } else {
+            let preview = learned
+                .iter()
+                .take(3)
+                .cloned()
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!(
+                "Palabras aprendidas: {preview}{}. Revísalas en Diccionario.",
+                if learned.len() > 3 { "…" } else { "" }
+            )
+        };
+        crate::notice::show(app, &message);
+    }
+    reviewed
+}
+
+fn locally_learnable(candidate: &Candidate) -> bool {
+    let valid = |value: &str| {
+        (2..=64).contains(&value.chars().count())
+            && !value.chars().any(char::is_whitespace)
+            && value.chars().all(|character| {
+                character.is_alphanumeric()
+                    || matches!(character, '-' | '_' | '.' | '+' | '#' | '\'' | '’')
+            })
+            && value.chars().any(char::is_alphabetic)
+            && !value.contains("..")
+    };
+    let _ = (&candidate.context_term, &candidate.context_replacement);
+    valid(candidate.term.trim())
+        && valid(candidate.replacement.trim())
+        && candidate.term.trim() != candidate.replacement.trim()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{locally_learnable, Candidate};
+
+    fn candidate(term: &str, replacement: &str) -> Candidate {
+        Candidate {
+            term: term.into(),
+            replacement: replacement.into(),
+            context_term: None,
+            context_replacement: None,
+        }
+    }
+
+    #[test]
+    fn only_safe_single_words_are_learned_locally() {
+        assert!(locally_learnable(&candidate("Rook", "RUC")));
+        assert!(locally_learnable(&candidate("postgre", "PostgreSQL")));
+        assert!(locally_learnable(&candidate("postgresql", "PostgreSQL")));
+        assert!(locally_learnable(&candidate("giresel", "girasoles")));
+        assert!(!locally_learnable(&candidate("hola amigo", "hola, amigo")));
+        assert!(!locally_learnable(&candidate("https://uno", "https://dos")));
+        assert!(!locally_learnable(&candidate("13", "3")));
+    }
 }

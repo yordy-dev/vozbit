@@ -22,4 +22,37 @@ $second = 'El RUC viene mañana y está mal.'
 $third = 'El RUC viene mañana y está bien.'
 if ((Get-CorrectionCandidate $first $second).replacement -cne 'RUC') { throw 'No se detectó la primera corrección' }
 if ((Get-CorrectionCandidate $second $third).replacement -cne 'bien') { throw 'No se detectó la segunda corrección' }
-"$($cases.Count + 2) pruebas de correcciones aprobadas"
+
+$longBefore = 'En este parrafo largo quiero hablar de girosol, postgre y el Rook del cliente. Luego repetimos varias ideas para comprobar que una correccion distante no invalida las demas palabras del texto completo.'
+$longAfter = 'En este párrafo largo quiero hablar de girasoles, PostgreSQL y el RUC del cliente. Luego repetimos varias ideas para comprobar que una corrección distante no invalida las demás palabras del texto completo.'
+$longCandidates = @(Get-CorrectionCandidates $longBefore $longAfter)
+$expected = @{
+    parrafo = 'párrafo'
+    girosol = 'girasoles'
+    postgre = 'PostgreSQL'
+    Rook = 'RUC'
+    correccion = 'corrección'
+    demas = 'demás'
+}
+if ($longCandidates.Count -ne $expected.Count) {
+    throw "El párrafo largo produjo $($longCandidates.Count) correcciones; se esperaban $($expected.Count)"
+}
+foreach ($candidate in $longCandidates) {
+    if (-not $expected.ContainsKey($candidate.term) -or $expected[$candidate.term] -cne $candidate.replacement) {
+        throw "Corrección inesperada en párrafo largo: $($candidate | ConvertTo-Json -Compress)"
+    }
+}
+
+$short = Get-CorrectionCandidate 'El tí viene mañana.' 'El que viene mañana.'
+if ($short.term -cne 'tí' -or $short.replacement -cne 'que' -or
+    $short.context_term -cne 'El tí viene mañana' -or
+    $short.context_replacement -cne 'El que viene mañana') {
+    throw "La palabra corta no conservó contexto seguro: $($short | ConvertTo-Json -Compress)"
+}
+
+$punctuation = Get-CorrectionCandidate 'Hola amigo cómo estás.' 'Hola, amigo cómo estás.'
+if ($punctuation.term -cne 'Hola amigo cómo' -or $punctuation.replacement -cne 'Hola, amigo cómo') {
+    throw "La puntuación no conservó contexto: $($punctuation | ConvertTo-Json -Compress)"
+}
+
+"$($cases.Count + 11) pruebas de correcciones aprobadas"

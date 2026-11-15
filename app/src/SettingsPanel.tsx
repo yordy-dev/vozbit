@@ -1,13 +1,14 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { createDataBackup, exportDiagnostics, runDiagnostics } from "./api";
-import { VoiceTextMark } from "./Icons";
+import { Icon, VoiceTextMark, type IconName } from "./Icons";
 import type { AppSettings, AudioDevice, AudioTestResult, DiagnosticReport, DictationResult, ModelStatus, ShortcutStatus } from "./types";
 import "./settings.css";
 
 type Category = "general" | "model" | "output" | "appearance" | "data" | "help";
 
 interface Props {
+  initialCategory?: Category;
   devices: AudioDevice[];
   settings: AppSettings;
   model: ModelStatus | null;
@@ -29,17 +30,17 @@ function Row({ title, hint, children }: { title: string; hint?: string; children
   return <div className="setting-row"><div><strong>{title}</strong>{hint && <small>{hint}</small>}</div>{children}</div>;
 }
 
-const categories: { id: Category; label: string }[] = [
-  { id: "general", label: "General" },
-  { id: "model", label: "Modelo local" },
-  { id: "output", label: "Texto y salida" },
-  { id: "appearance", label: "Apariencia" },
-  { id: "data", label: "Datos y app" },
-  { id: "help", label: "Ayuda y acerca de" },
+const categories: { id: Category; label: string; icon: IconName }[] = [
+  { id: "general", label: "General", icon: "settings" },
+  { id: "model", label: "Modelo local", icon: "mic" },
+  { id: "output", label: "Texto y salida", icon: "copy" },
+  { id: "appearance", label: "Apariencia", icon: "star" },
+  { id: "data", label: "Datos y app", icon: "history" },
+  { id: "help", label: "Ayuda y acerca de", icon: "help" },
 ];
 
 export function SettingsPanel(p: Props) {
-  const [category, setCategory] = useState<Category>("general");
+  const [category, setCategory] = useState<Category>(p.initialCategory ?? "general");
   const [candidate, setCandidate] = useState(p.shortcut?.shortcut ?? "Ctrl+Shift+Space");
   const [message, setMessage] = useState("");
   const [failed, setFailed] = useState(false);
@@ -54,6 +55,7 @@ export function SettingsPanel(p: Props) {
 
   useEffect(() => { void invoke<boolean>("dictation_status").then(setHasAudio).catch(() => undefined); }, []);
   useEffect(() => { if (p.shortcut) setCandidate(p.shortcut.shortcut); }, [p.shortcut]);
+  useEffect(() => { if (p.initialCategory) setCategory(p.initialCategory); }, [p.initialCategory]);
   useEffect(() => setOpacityDraft(p.settings.overlay_opacity), [p.settings.overlay_opacity]);
   useEffect(() => {
     const selectTourCategory = (event: Event) => {
@@ -101,7 +103,7 @@ export function SettingsPanel(p: Props) {
   return <div className="vt-settings-layout">
     <aside className="vt-settings-sidebar" aria-label="Categorías de configuración">
       <p>CONFIGURACIÓN</p>
-      <nav>{categories.map(item => <button key={item.id} type="button" className={category === item.id ? "active" : ""} aria-current={category === item.id ? "page" : undefined} onClick={() => selectCategory(item.id)}>{item.label}</button>)}</nav>
+      <nav>{categories.map(item => <button key={item.id} type="button" className={category === item.id ? "active" : ""} aria-current={category === item.id ? "page" : undefined} onClick={() => selectCategory(item.id)}><Icon name={item.icon} size={17}/><span>{item.label}</span></button>)}</nav>
       <div className="vt-settings-tail">Sin cuenta · datos en este equipo.</div>
     </aside>
 
@@ -142,7 +144,7 @@ export function SettingsPanel(p: Props) {
           <Row title="Espacio al terminar">{toggle("append_trailing_space", "Espacio al terminar")}</Row>
         </div>
         <h2 className="vt-settings-group-label">DICCIONARIO</h2><div className="surface settings-card">
-          <Row title="Aprender de mis correcciones" hint="Opcional: observa durante 30 segundos el campo donde se insertó el último dictado. Guarda palabras claras automáticamente; revisa cambios ambiguos en Diccionario.">{toggle("learn_corrections", "Aprender de mis correcciones")}</Row>
+          <Row title="Aprender de mis correcciones" hint="Observa durante 30 segundos el campo del último dictado. Si sustituyes una palabra, guarda la forma correcta y la aplica en futuros dictados. Todo se procesa localmente.">{toggle("learn_corrections", "Aprender de mis correcciones")}</Row>
           <Row title="Agregar palabra seleccionada" hint="Selecciona texto en un editor compatible."><kbd>Ctrl + Alt + L</kbd></Row>
         </div>
       </section>

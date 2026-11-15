@@ -15,6 +15,7 @@ import "./dictation.css";
 
 type View = "home" | "history" | "dictionary" | "settings" | "about" | "help";
 type DictationState = "idle" | "starting" | "recording" | "transcribing";
+type SettingsCategory = "general" | "model" | "output" | "appearance" | "data" | "help";
 
 const DEFAULT_SETTINGS: AppSettings = {
   tutorial_version: 0,
@@ -59,6 +60,7 @@ export default function App() {
   const [savingHistory, setSavingHistory] = useState(false);
   const [copyStatus, setCopyStatus] = useState("");
   const [viewBeforeSettings, setViewBeforeSettings] = useState<View>("home");
+  const [settingsCategory, setSettingsCategory] = useState<SettingsCategory>("general");
   const resizeRevision = useRef(0);
   const resizeQueue = useRef<Promise<void>>(Promise.resolve());
   const compactPosition = useRef<PhysicalPosition | null>(null);
@@ -384,7 +386,7 @@ export default function App() {
   const expanded = view === "settings" || view === "help" || view === "about";
   const statusText = dictationState === "recording" ? "Te escucho…" : dictationState === "transcribing" ? "Procesando en este equipo…" : dictationState === "starting" ? "Preparando el micrófono…" : !model ? "Comprobando modelos locales…" : !modelsReady ? "Revisa el motor local" : "Listo para dictar";
   const statusDescription = dictationState === "recording" ? `${dictationElapsed.toFixed(1)} de ${dictationMaxSeconds} segundos` : dictationState === "transcribing" ? "El indicador desaparecerá cuando termine." : !modelsReady && model ? "Abre Configuración para comprobar los archivos del motor." : settings.auto_insert ? "Coloca el cursor en un campo de texto y usa tu atajo." : "El texto aparecerá aquí para revisarlo y copiarlo.";
-  function openSettings() { setViewBeforeSettings(view); setView("settings"); }
+  function openSettings(category: SettingsCategory = "general") { setViewBeforeSettings(view); setSettingsCategory(category); setView("settings"); }
   function leaveExpanded() { setView(view === "settings" ? viewBeforeSettings : "settings"); }
   function updateFromHome(patch: Partial<AppSettings>) { void patchAppSettings(patch).catch(() => undefined); }
 
@@ -392,19 +394,19 @@ export default function App() {
     <div className={`vt-app ${expanded ? "vt-app-expanded" : "vt-app-compact"}`}>
       <header className="vt-topbar">
         <VoiceTextLogo />
-        {expanded ? <button className="vt-top-action" type="button" onClick={leaveExpanded} aria-label="Volver">← {view === "settings" ? "Volver" : "Configuración"}</button> : <button className="vt-top-icon" type="button" onClick={openSettings} aria-label="Abrir Configuración" title="Configuración"><Icon name="settings" size={19}/></button>}
+        {expanded ? <button className="vt-top-action" type="button" onClick={leaveExpanded} aria-label="Volver"><span aria-hidden="true">←</span> {view === "settings" ? "Volver" : "Configuración"}</button> : <button className="vt-top-icon" type="button" onClick={() => openSettings()} aria-label="Abrir Configuración" title="Configuración"><Icon name="settings" size={19}/></button>}
       </header>
 
       {expanded ? <main className="vt-expanded-main">
-        {view === "settings" ? <SettingsPanel devices={devices} settings={settings} model={model} shortcut={shortcut} lastResult={dictationResult} error={settingsError} onPatch={patchAppSettings} onShortcutChange={changeShortcut} onTestMicrophone={() => testInputDevice(settings.preferred_device_id, false)} onRefreshModel={async () => { setModel(await getModelStatus()); setSettingsError(""); }} onRefreshDevices={async () => { setDevices(await listInputDevices()); setSettingsError(""); }} onReprocess={reprocessLast} onHelp={() => setView("help")} onAbout={() => setView("about")} onRepeatTutorial={() => { setView("home"); setShowTutorial(true); }}/>
+        {view === "settings" ? <SettingsPanel initialCategory={settingsCategory} devices={devices} settings={settings} model={model} shortcut={shortcut} lastResult={dictationResult} error={settingsError} onPatch={patchAppSettings} onShortcutChange={changeShortcut} onTestMicrophone={() => testInputDevice(settings.preferred_device_id, false)} onRefreshModel={async () => { setModel(await getModelStatus()); setSettingsError(""); }} onRefreshDevices={async () => { setDevices(await listInputDevices()); setSettingsError(""); }} onReprocess={reprocessLast} onHelp={() => setView("help")} onAbout={() => setView("about")} onRepeatTutorial={() => { setView("home"); setShowTutorial(true); }}/>
         : view === "help" ? <div className="vt-expanded-page"><Help onRepeatTutorial={() => { setView("home"); setShowTutorial(true); }}/></div>
         : <div className="vt-expanded-page"><InfoPage title="Acerca de Vozbit" text="Aplicación independiente de dictado para Windows. Usa motores locales de voz; no requiere cuenta ni suscripción."/></div>}
       </main> : <>
         <main className="vt-compact-main">
           {view === "dictionary" ? <DictionaryPanel learningEnabled={settings.learn_corrections} onToggleLearning={(enabled) => patchAppSettings({ learn_corrections: enabled })} /> : view === "history" ? <><header className="vt-screen-header"><h1>Historial</h1><p>Transcripciones guardadas en este equipo.</p></header><HistoryPanel revision={historyRevision}/></> : <>
             {!inDesktop && <div className="notice">Abre la aplicación de escritorio para usar el micrófono y el motor local.</div>}
-            {settingsError && <div className="error" role="alert">{settingsError}</div>}
-            {shortcut && !shortcut.registered && <div className="error" role="alert">El atajo no está disponible. Elige otra combinación en Configuración.</div>}
+            {settingsError && <div className="error vt-action-alert" role="alert"><span>{settingsError}</span><button type="button" onClick={() => openSettings("general")}>Abrir configuración</button></div>}
+            {shortcut && !shortcut.registered && <div className="error vt-action-alert" role="alert"><span>El atajo no está disponible.</span><button type="button" onClick={() => openSettings("general")}>Cambiar atajo</button></div>}
             <section className={`surface vt-status-card ${dictationState}`} aria-live="polite">
               <div className="vt-status-heading"><span className={`vt-status-dot ${dictationState === "idle" && !modelsReady ? "warning" : dictationState}`}/><strong>{statusText}</strong></div>
               <p>{statusDescription}</p>
@@ -428,10 +430,20 @@ export default function App() {
                 {copyStatus && <p className="vt-copy-status" role="status">{copyStatus}</p>}
               </> : <p className="vt-empty-result">Aún no hay transcripciones. Tu próximo dictado aparecerá aquí.</p>}
             </section>
-            {dictationError && <div className="error" role="alert">{dictationError}</div>}
-            <div className="vt-home-tools">{dictationState === "idle" ? <><button type="button" disabled={!inDesktop || !modelsReady} onClick={() => void beginDictation(false)}>Probar dictado aquí</button>{!dictationResult && inDesktop && <button type="button" onClick={() => void recoverLastResult()}>Recuperar último texto</button>}</> : dictationState === "recording" ? <><button type="button" onClick={() => void finishDictation()}>Detener prueba</button><button type="button" onClick={() => void abortDictation()}>Cancelar</button></> : <span>Espera a que termine el procesamiento…</span>}</div>
+            {dictationError && <div className="error vt-action-alert" role="alert"><span>{dictationError}</span>{!modelsReady && <button type="button" onClick={() => openSettings("model")}>Revisar motor</button>}</div>}
           </>}
         </main>
+        {view === "home" && <div className="vt-action-dock" aria-label="Acción principal">
+          {dictationState === "idle" ? <>
+            <button className="vt-primary-action" type="button" disabled={!inDesktop} onClick={() => modelsReady ? void beginDictation(false) : openSettings("model")}>
+              <Icon name={modelsReady ? "mic" : "settings"} size={17}/>{modelsReady ? "Probar dictado" : "Revisar motor local"}
+            </button>
+            {!dictationResult && inDesktop && <button className="vt-secondary-action" type="button" onClick={() => void recoverLastResult()}>Recuperar texto</button>}
+          </> : dictationState === "recording" ? <>
+            <button className="vt-primary-action is-stop" type="button" onClick={() => void finishDictation()}>Detener y transcribir</button>
+            <button className="vt-secondary-action" type="button" onClick={() => void abortDictation()}>Cancelar</button>
+          </> : <span className="vt-processing-action"><span className="working-dot" aria-hidden="true"/>Procesando en este equipo…</span>}
+        </div>}
         <nav className="vt-bottom-nav" aria-label="Navegación principal">
           <button className={view === "home" ? "active" : ""} type="button" aria-current={view === "home" ? "page" : undefined} onClick={() => setView("home")}><Icon name="home" size={18}/>Inicio</button>
           <button className={view === "history" ? "active" : ""} type="button" aria-current={view === "history" ? "page" : undefined} onClick={() => setView("history")}><Icon name="history" size={18}/>Historial</button>

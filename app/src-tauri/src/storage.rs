@@ -146,7 +146,10 @@ fn open(app: &AppHandle) -> Result<Connection, String> {
              );
              CREATE TABLE IF NOT EXISTS dictionary_meta(term TEXT PRIMARY KEY COLLATE NOCASE,source TEXT NOT NULL DEFAULT 'manual',enabled INTEGER NOT NULL DEFAULT 1);
              CREATE TABLE IF NOT EXISTS suggestions(term TEXT PRIMARY KEY COLLATE NOCASE,replacement TEXT NOT NULL);
-             PRAGMA user_version=3;
+             CREATE TABLE IF NOT EXISTS auto_learned_words(term TEXT PRIMARY KEY COLLATE NOCASE,added_at_ms INTEGER NOT NULL,last_used_at_ms INTEGER NOT NULL);
+             CREATE TABLE IF NOT EXISTS learned_aliases(term TEXT PRIMARY KEY COLLATE NOCASE,replacement TEXT NOT NULL,learned_at_ms INTEGER NOT NULL);
+             DELETE FROM settings WHERE key IN ('learning_judge_api_key_dpapi','learning_judge_base_url','learning_judge_model');
+             PRAGMA user_version=4;
              COMMIT;",
             )
             .map_err(|error| format!("No se pudo preparar la base local: {error}"))?;
@@ -634,6 +637,12 @@ pub async fn dictionary_delete(app: AppHandle, term: String) -> Result<(), Strin
         connection
             .execute("DELETE FROM dictionary_meta WHERE term=?1", [&term])
             .map_err(|e| e.to_string())?;
+        connection
+            .execute("DELETE FROM auto_learned_words WHERE term=?1", [&term])
+            .map_err(|e| e.to_string())?;
+        connection
+            .execute("DELETE FROM learned_aliases WHERE replacement=?1", [&term])
+            .map_err(|e| e.to_string())?;
         Ok(())
     })
     .await
@@ -695,10 +704,168 @@ fn apply_entries(entries: &[DictionaryEntry], text: &str) -> Result<DictionaryPr
 
 pub(crate) fn apply_dictionary(app: &AppHandle, text: &str) -> Result<DictionaryPreview, String> {
     let connection = open(app)?;
+    let aliases = read_learned_aliases(&connection)?;
+    let alias_preview = apply_entries(&aliases, text)?;
     let entries = read_dictionary(&connection)?;
-    apply_entries(&entries, text)
+    let mut preview = apply_entries(&entries, &alias_preview.text)?;
+    preview.changes += alias_preview.changes;
+    Ok(preview)
 }
 
+fn read_learned_aliases(connection: &Connection) -> Result<Vec<DictionaryEntry>, String> {
+    let mut statement = connection
+        .prepare("SELECT a.term,a.replacement FROM learned_aliases a JOIN dictionary_meta m ON m.term=a.replacement WHERE m.source='learned' AND m.enabled=1 ORDER BY length(a.term) DESC LIMIT 500")
+        .map_err(|error| error.to_string())?;
+    let rows = statement
+        .query_map([], |row| {
+            Ok(DictionaryEntry {
+                term: row.get(0)?,
+                replacement: row.get(1)?,
+                source: "learned_alias".into(),
+                enabled: true,
+            })
+        })
+        .map_err(|error| error.to_string())?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|error| error.to_string())
+}
+
+fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
+        .min(i64::MAX as u128) as i64
+}
+
+pub(crate) fn save_auto_learned_word(
+    app: &AppHandle,
+    observed: &str,
+    correct: &str,
+) -> Result<(), String> {
+    let observed = observed.trim();
+    let correct = correct.trim();
+    if !safe_learned_word(observed, correct) {
+        return Err("La corrección no es una palabra aprendible".into());
+    }
+    let mut connection = open(app)?;
+    save_auto_learned_word_in_connection(&mut connection, observed, correct)
+}
+
+fn safe_learned_word(observed: &str, correct: &str) -> bool {
+    let valid = |value: &str| {
+        (2..=64).contains(&value.chars().count())
+            && !value.chars().any(char::is_whitespace)
+            && value.chars().all(|character| {
+                character.is_alphanumeric()
+                    || matches!(character, '-' | '_' | '.' | '+' | '#' | '\'' | '’')
+            })
+            && value.chars().any(char::is_alphabetic)
+            && !value.contains("..")
+    };
+    valid(observed) && valid(correct) && observed != correct
+}
+
+fn save_auto_learned_word_in_connection(
+    connection: &mut Connection,
+    observed: &str,
+    correct: &str,
+) -> Result<(), String> {
+    let timestamp = now_ms();
+    let tx = connection
+        .transaction()
+        .map_err(|error| error.to_string())?;
+    let protected: Option<(String, i64)> = tx
+        .query_row(
+            "SELECT coalesce(source,'manual'),coalesce(enabled,1) FROM dictionary_meta WHERE term=?1",
+            [correct],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()
+        .map_err(|error| error.to_string())?;
+    if protected.as_ref().is_some_and(|(_, enabled)| *enabled == 0) {
+        return Err("La palabra está desactivada en el diccionario".into());
+    }
+    let manual = protected
+        .as_ref()
+        .is_some_and(|(source, _)| source == "manual");
+    if !manual {
+        tx.execute(
+            "INSERT INTO dictionary(term,replacement) VALUES(?1,?1) ON CONFLICT(term) DO NOTHING",
+            [correct],
+        )
+        .map_err(|error| error.to_string())?;
+        tx.execute(
+            "INSERT INTO dictionary_meta(term,source,enabled) VALUES(?1,'learned',1) ON CONFLICT(term) DO UPDATE SET source='learned',enabled=1",
+            [correct],
+        )
+        .map_err(|error| error.to_string())?;
+        tx.execute(
+            "INSERT INTO auto_learned_words(term,added_at_ms,last_used_at_ms) VALUES(?1,?2,?2) ON CONFLICT(term) DO UPDATE SET last_used_at_ms=excluded.last_used_at_ms",
+            params![correct, timestamp],
+        )
+        .map_err(|error| error.to_string())?;
+    }
+    tx.execute(
+        "INSERT INTO learned_aliases(term,replacement,learned_at_ms) VALUES(?1,?2,?3) ON CONFLICT(term) DO UPDATE SET replacement=excluded.replacement,learned_at_ms=excluded.learned_at_ms",
+        params![observed, correct, timestamp],
+    )
+    .map_err(|error| error.to_string())?;
+    tx.execute("DELETE FROM suggestions WHERE term=?1", [observed])
+        .map_err(|error| error.to_string())?;
+
+    let overflow: Vec<String> = {
+        let mut statement = tx
+            .prepare("SELECT term FROM auto_learned_words ORDER BY last_used_at_ms DESC,added_at_ms DESC LIMIT -1 OFFSET 300")
+            .map_err(|error| error.to_string())?;
+        let rows = statement
+            .query_map([], |row| row.get(0))
+            .map_err(|error| error.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| error.to_string())?;
+        rows
+    };
+    for term in overflow {
+        tx.execute("DELETE FROM learned_aliases WHERE replacement=?1", [&term])
+            .map_err(|error| error.to_string())?;
+        tx.execute("DELETE FROM auto_learned_words WHERE term=?1", [&term])
+            .map_err(|error| error.to_string())?;
+        tx.execute(
+            "DELETE FROM dictionary_meta WHERE term=?1 AND source='learned'",
+            [&term],
+        )
+        .map_err(|error| error.to_string())?;
+        tx.execute(
+            "DELETE FROM dictionary WHERE term=?1 AND replacement=term",
+            [&term],
+        )
+        .map_err(|error| error.to_string())?;
+    }
+    tx.commit().map_err(|error| error.to_string())
+}
+
+pub(crate) fn queue_learning_suggestion(
+    app: &AppHandle,
+    term: &str,
+    replacement: &str,
+) -> Result<(), String> {
+    if !reviewable_correction(term, replacement) {
+        return Ok(());
+    }
+    let connection = open(app)?;
+    connection
+        .execute(
+            "INSERT INTO suggestions(term,replacement) VALUES(?1,?2) ON CONFLICT(term) DO UPDATE SET replacement=excluded.replacement",
+            params![term.trim(), replacement.trim()],
+        )
+        .map_err(|error| error.to_string())?;
+    connection
+        .execute("DELETE FROM suggestions WHERE rowid NOT IN (SELECT rowid FROM suggestions ORDER BY rowid DESC LIMIT 100)", [])
+        .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+#[cfg(test)]
 fn clear_single_word_correction(term: &str, replacement: &str) -> bool {
     let old_len = term.chars().count();
     let new_len = replacement.chars().count();
@@ -788,19 +955,106 @@ fn reviewable_correction(term: &str, replacement: &str) -> bool {
     true
 }
 
+#[cfg(test)]
+#[allow(dead_code)]
 pub(crate) fn save_suggestion(
     app: &AppHandle,
     term: &str,
     replacement: &str,
+    context_term: Option<&str>,
+    context_replacement: Option<&str>,
 ) -> Result<bool, String> {
     let mut db = open(app)?;
-    save_suggestion_in_connection(&mut db, term, replacement)
+    save_observed_correction_in_connection(
+        &mut db,
+        term,
+        replacement,
+        context_term,
+        context_replacement,
+    )
 }
 
+#[cfg(test)]
 fn save_suggestion_in_connection(
     db: &mut Connection,
     term: &str,
     replacement: &str,
+) -> Result<bool, String> {
+    save_observed_correction_in_connection(db, term, replacement, None, None)
+}
+
+#[cfg(test)]
+fn verified_learned_rule(db: &mut Connection, term: &str, replacement: &str) -> Result<(), String> {
+    let tx = db.transaction().map_err(|error| error.to_string())?;
+    tx.execute(
+        "INSERT INTO dictionary(term,replacement) VALUES(?1,?2) ON CONFLICT(term) DO UPDATE SET replacement=excluded.replacement",
+        params![term, replacement],
+    )
+    .map_err(|error| error.to_string())?;
+    tx.execute(
+        "INSERT INTO dictionary_meta(term,source,enabled) VALUES(?1,'learned',1) ON CONFLICT(term) DO UPDATE SET source='learned',enabled=1",
+        [term],
+    )
+    .map_err(|error| error.to_string())?;
+    tx.execute("DELETE FROM suggestions WHERE term=?1", [term])
+        .map_err(|error| error.to_string())?;
+
+    let stored: (String, String, i64) = tx
+        .query_row(
+            "SELECT d.replacement,coalesce(m.source,''),coalesce(m.enabled,0) FROM dictionary d LEFT JOIN dictionary_meta m ON m.term=d.term WHERE d.term=?1",
+            [term],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .map_err(|error| format!("La regla no pudo releerse antes de guardarse: {error}"))?;
+    if stored.0 != replacement || stored.1 != "learned" || stored.2 != 1 {
+        return Err("La regla aprendida no coincide con la corrección observada".into());
+    }
+    let preview = apply_entries(
+        &[DictionaryEntry {
+            term: term.to_string(),
+            replacement: replacement.to_string(),
+            source: "learned".into(),
+            enabled: true,
+        }],
+        term,
+    )?;
+    if preview.text != replacement || preview.changes != 1 {
+        return Err("La regla se guardó, pero no superó la prueba de aplicación".into());
+    }
+    tx.commit().map_err(|error| error.to_string())?;
+
+    let confirmed: (String, String, i64) = db
+        .query_row(
+            "SELECT d.replacement,coalesce(m.source,''),coalesce(m.enabled,0) FROM dictionary d LEFT JOIN dictionary_meta m ON m.term=d.term WHERE d.term=?1",
+            [term],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .map_err(|error| format!("La regla no persistió después de la transacción: {error}"))?;
+    if confirmed.0 != replacement || confirmed.1 != "learned" || confirmed.2 != 1 {
+        return Err("La regla no persistió después de la transacción".into());
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+fn rule_is_protected(db: &Connection, term: &str) -> Result<bool, String> {
+    db.query_row(
+        "SELECT coalesce(m.source,'manual')='manual' OR coalesce(m.enabled,1)=0 FROM dictionary d LEFT JOIN dictionary_meta m ON m.term=d.term WHERE d.term=?1",
+        [term],
+        |row| row.get(0),
+    )
+    .optional()
+    .map(|value| value.unwrap_or(false))
+    .map_err(|error| error.to_string())
+}
+
+#[cfg(test)]
+fn save_observed_correction_in_connection(
+    db: &mut Connection,
+    term: &str,
+    replacement: &str,
+    context_term: Option<&str>,
+    context_replacement: Option<&str>,
 ) -> Result<bool, String> {
     if !reviewable_correction(term, replacement) {
         return Err("Corrección inválida o sin contexto suficiente".into());
@@ -808,17 +1062,24 @@ fn save_suggestion_in_connection(
     let count: i64 = db
         .query_row("SELECT count(*) FROM dictionary", [], |r| r.get(0))
         .map_err(|e| e.to_string())?;
-    let single_words = clear_single_word_correction(term, replacement);
-    let protected_rule:bool=db.query_row("SELECT coalesce(m.source,'manual')='manual' OR coalesce(m.enabled,1)=0 FROM dictionary d LEFT JOIN dictionary_meta m ON m.term=d.term WHERE d.term=?1",[term],|r|r.get(0)).optional().map_err(|e|e.to_string())?.unwrap_or(false);
-    if single_words && !protected_rule && count < 500 {
-        let tx = db.transaction().map_err(|e| e.to_string())?;
-        tx.execute("INSERT INTO dictionary(term,replacement) VALUES(?1,?2) ON CONFLICT(term) DO UPDATE SET replacement=excluded.replacement",params![term,replacement]).map_err(|e|e.to_string())?;
-        tx.execute("INSERT INTO dictionary_meta(term,source,enabled) VALUES(?1,'learned',1) ON CONFLICT(term) DO UPDATE SET source='learned',enabled=1",[term]).map_err(|e|e.to_string())?;
-        tx.execute("DELETE FROM suggestions WHERE term=?1", [term])
-            .map_err(|e| e.to_string())?;
-        tx.commit().map_err(|e| e.to_string())?;
+    let protected_rule = rule_is_protected(db, term)?;
+    if clear_single_word_correction(term, replacement) && !protected_rule && count < 500 {
+        verified_learned_rule(db, term, replacement)?;
         return Ok(true);
     }
+
+    if let (Some(context_term), Some(context_replacement)) = (context_term, context_replacement) {
+        let context_term = context_term.trim();
+        let context_replacement = context_replacement.trim();
+        if reviewable_correction(context_term, context_replacement)
+            && !rule_is_protected(db, context_term)?
+            && count < 500
+        {
+            verified_learned_rule(db, context_term, context_replacement)?;
+            return Ok(true);
+        }
+    }
+
     let tx = db.transaction().map_err(|e| e.to_string())?;
     tx.execute("DELETE FROM suggestions WHERE term=?1", [term])
         .map_err(|e| e.to_string())?;
@@ -828,6 +1089,16 @@ fn save_suggestion_in_connection(
     )
     .map_err(|e| e.to_string())?;
     tx.execute("DELETE FROM suggestions WHERE rowid NOT IN (SELECT rowid FROM suggestions ORDER BY rowid DESC LIMIT 100)",[]).map_err(|e|e.to_string())?;
+    let stored: String = tx
+        .query_row(
+            "SELECT replacement FROM suggestions WHERE term=?1",
+            [term],
+            |row| row.get(0),
+        )
+        .map_err(|error| format!("La sugerencia no pudo releerse: {error}"))?;
+    if stored != replacement {
+        return Err("La sugerencia guardada no coincide con la corrección".into());
+    }
     tx.commit().map_err(|e| e.to_string())?;
     Ok(false)
 }
@@ -836,7 +1107,8 @@ fn save_suggestion_in_connection(
 mod learning_tests {
     use super::{
         apply_entries, clear_single_word_correction, is_vocabulary_prompt_term,
-        reviewable_correction, save_suggestion_in_connection, DictionaryEntry,
+        reviewable_correction, save_auto_learned_word_in_connection,
+        save_observed_correction_in_connection, save_suggestion_in_connection, DictionaryEntry,
     };
     use rusqlite::Connection;
     #[test]
@@ -952,6 +1224,96 @@ mod learning_tests {
             .unwrap();
         assert_eq!(source, "manual");
     }
+
+    #[test]
+    fn short_word_is_learned_with_context_and_verified_after_commit() {
+        let mut db = Connection::open_in_memory().unwrap();
+        db.execute_batch("CREATE TABLE dictionary(term TEXT PRIMARY KEY COLLATE NOCASE,replacement TEXT NOT NULL);
+            CREATE TABLE dictionary_meta(term TEXT PRIMARY KEY COLLATE NOCASE,source TEXT,enabled INTEGER);
+            CREATE TABLE suggestions(term TEXT PRIMARY KEY COLLATE NOCASE,replacement TEXT);").unwrap();
+        assert!(save_observed_correction_in_connection(
+            &mut db,
+            "tí",
+            "que",
+            Some("El tí viene mañana"),
+            Some("El que viene mañana"),
+        )
+        .unwrap());
+        let stored: (String, String, i64) = db
+            .query_row(
+                "SELECT d.replacement,m.source,m.enabled FROM dictionary d JOIN dictionary_meta m ON m.term=d.term WHERE d.term='El tí viene mañana'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(stored, ("El que viene mañana".into(), "learned".into(), 1));
+        let exact_count: i64 = db
+            .query_row(
+                "SELECT count(*) FROM dictionary WHERE term='tí'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(exact_count, 0);
+    }
+
+    #[test]
+    fn corrected_word_is_visible_as_vocabulary_and_alias_fixes_parakeet_output() {
+        let mut db = Connection::open_in_memory().unwrap();
+        db.execute_batch("CREATE TABLE dictionary(term TEXT PRIMARY KEY COLLATE NOCASE,replacement TEXT NOT NULL);
+            CREATE TABLE dictionary_meta(term TEXT PRIMARY KEY COLLATE NOCASE,source TEXT,enabled INTEGER);
+            CREATE TABLE suggestions(term TEXT PRIMARY KEY COLLATE NOCASE,replacement TEXT);
+            CREATE TABLE auto_learned_words(term TEXT PRIMARY KEY COLLATE NOCASE,added_at_ms INTEGER,last_used_at_ms INTEGER);
+            CREATE TABLE learned_aliases(term TEXT PRIMARY KEY COLLATE NOCASE,replacement TEXT,learned_at_ms INTEGER);")
+            .unwrap();
+        save_auto_learned_word_in_connection(&mut db, "Rook", "RUC").unwrap();
+        let visible: (String, String, String) = db
+            .query_row(
+                "SELECT d.term,d.replacement,m.source FROM dictionary d JOIN dictionary_meta m ON m.term=d.term",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(visible, ("RUC".into(), "RUC".into(), "learned".into()));
+        let alias: String = db
+            .query_row(
+                "SELECT replacement FROM learned_aliases WHERE term='Rook'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(alias, "RUC");
+    }
+
+    #[test]
+    fn local_learning_keeps_manual_word_and_adds_exact_alias() {
+        let mut db = Connection::open_in_memory().unwrap();
+        db.execute_batch("CREATE TABLE dictionary(term TEXT PRIMARY KEY COLLATE NOCASE,replacement TEXT NOT NULL);
+            CREATE TABLE dictionary_meta(term TEXT PRIMARY KEY COLLATE NOCASE,source TEXT,enabled INTEGER);
+            CREATE TABLE suggestions(term TEXT PRIMARY KEY COLLATE NOCASE,replacement TEXT);
+            CREATE TABLE auto_learned_words(term TEXT PRIMARY KEY COLLATE NOCASE,added_at_ms INTEGER,last_used_at_ms INTEGER);
+            CREATE TABLE learned_aliases(term TEXT PRIMARY KEY COLLATE NOCASE,replacement TEXT,learned_at_ms INTEGER);
+            INSERT INTO dictionary(term,replacement) VALUES('PostgreSQL','PostgreSQL');
+            INSERT INTO dictionary_meta(term,source,enabled) VALUES('PostgreSQL','manual',1);")
+            .unwrap();
+        save_auto_learned_word_in_connection(&mut db, "postgresql", "PostgreSQL").unwrap();
+        let source: String = db
+            .query_row(
+                "SELECT source FROM dictionary_meta WHERE term='PostgreSQL'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let alias: String = db
+            .query_row(
+                "SELECT replacement FROM learned_aliases WHERE term='postgresql'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(source, "manual");
+        assert_eq!(alias, "PostgreSQL");
+    }
 }
 
 #[tauri::command]
@@ -982,8 +1344,11 @@ pub async fn dictionary_review(
     accept: bool,
 ) -> Result<(), String> {
     if accept {
-        dictionary_upsert(app.clone(), term.clone(), replacement).await?;
-        open(&app)?.execute("INSERT INTO dictionary_meta(term,source,enabled) VALUES(?1,'learned',1) ON CONFLICT(term) DO UPDATE SET source='learned',enabled=1",[&term]).map_err(|e|e.to_string())?;
+        if safe_learned_word(term.trim(), replacement.trim()) {
+            save_auto_learned_word(&app, &term, &replacement)?;
+        } else {
+            dictionary_upsert(app.clone(), term.clone(), replacement).await?;
+        }
         crate::notice::show(&app, "Corrección guardada en el diccionario");
     }
     open(&app)?

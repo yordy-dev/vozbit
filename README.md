@@ -108,7 +108,9 @@ Vozbit no ofrece actualmente versiones para macOS o Linux.
 
 ## Privacidad
 
-Vozbit no requiere una cuenta. Whisper y Parakeet procesan el audio localmente. El historial guarda texto en el equipo y puede desactivarse; el modo privado tampoco conserva historial, aprendizaje ni el último audio para reprocesar. El aprendizaje de correcciones es opcional y no observa campos de contraseña.
+Vozbit no requiere una cuenta. Whisper y Parakeet procesan el audio localmente. El historial guarda texto en el equipo y puede desactivarse; el modo privado tampoco conserva historial, aprendizaje ni el último audio para reprocesar.
+
+El aprendizaje de correcciones es opcional y completamente local. Después de entregar un dictado, Vozbit observa durante un máximo de 30 segundos únicamente ese mismo campo y detecta sustituciones claras de una palabra. La forma correcta se guarda en el diccionario y la variante reconocida se corrige en futuros dictados. No observa campos de contraseña ni utiliza servicios de IA para aprender.
 
 <details>
 <summary><strong>Desarrollo local</strong></summary>
