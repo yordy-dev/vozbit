@@ -54,6 +54,7 @@ struct BackupPayload {
 #[derive(Serialize)]
 pub struct AppSettings {
     tutorial_version: u8,
+    theme: String,
     learn_corrections: bool,
     language: String,
     transcription_engine: String,
@@ -76,6 +77,7 @@ pub struct AppSettings {
 #[derive(Deserialize)]
 pub struct SettingsPatch {
     tutorial_version: Option<u8>,
+    theme: Option<String>,
     learn_corrections: Option<bool>,
     language: Option<String>,
     transcription_engine: Option<String>,
@@ -182,6 +184,9 @@ pub async fn settings_get(app: AppHandle) -> Result<AppSettings, String> {
             tutorial_version: read_setting(&app, "tutorial_version")?
                 .and_then(|value| value.parse::<u8>().ok())
                 .unwrap_or(0),
+            theme: read_setting(&app, "theme")?
+                .filter(|value| matches!(value.as_str(), "system" | "light" | "dark" | "contrast"))
+                .unwrap_or_else(|| "system".into()),
             learn_corrections: read_setting(&app, "learn_corrections")?.as_deref() == Some("true")
                 && read_setting(&app, "learning_consent_v048")?.as_deref() == Some("true"),
             language: read_setting(&app, "language")?.unwrap_or_else(|| "es".into()),
@@ -221,6 +226,11 @@ pub async fn settings_get(app: AppHandle) -> Result<AppSettings, String> {
 pub async fn settings_patch(app: AppHandle, patch: SettingsPatch) -> Result<(), String> {
     if patch.tutorial_version.is_some_and(|version| version > 1) {
         return Err("La versión del tutorial no es válida".into());
+    }
+    if let Some(theme) = &patch.theme {
+        if !matches!(theme.as_str(), "system" | "light" | "dark" | "contrast") {
+            return Err("El tema seleccionado no es válido".into());
+        }
     }
     if let Some(language) = &patch.language {
         if !matches!(language.as_str(), "auto" | "es" | "en") {
@@ -272,6 +282,7 @@ pub async fn settings_patch(app: AppHandle, patch: SettingsPatch) -> Result<(), 
             crate::transcription::verify_parakeet_resources(&app)?;
         }
         if let Some(version) = patch.tutorial_version { write_setting(&app, "tutorial_version", &version.to_string())?; }
+        if let Some(theme) = patch.theme { write_setting(&app, "theme", &theme)?; }
         if let Some(enabled) = patch.learn_corrections {
             write_setting(&app, "learn_corrections", if enabled {"true"} else {"false"})?;
             if enabled { write_setting(&app, "learning_consent_v048", "true")?; }

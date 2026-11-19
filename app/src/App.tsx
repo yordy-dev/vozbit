@@ -19,6 +19,7 @@ type SettingsCategory = "general" | "model" | "output" | "appearance" | "data" |
 
 const DEFAULT_SETTINGS: AppSettings = {
   tutorial_version: 0,
+  theme: "system",
   learn_corrections: false,
   language: "es",
   transcription_engine: "whisper",
@@ -391,7 +392,7 @@ export default function App() {
   function updateFromHome(patch: Partial<AppSettings>) { void patchAppSettings(patch).catch(() => undefined); }
 
   return <>
-    <div className={`vt-app ${expanded ? "vt-app-expanded" : "vt-app-compact"}`}>
+    <div className={`vt-app ${expanded ? "vt-app-expanded" : "vt-app-compact"}`} data-theme={settings.theme}>
       <header className="vt-topbar">
         <VoiceTextLogo />
         {expanded ? <button className="vt-top-action" type="button" onClick={leaveExpanded} aria-label="Volver"><span aria-hidden="true">←</span> {view === "settings" ? "Volver" : "Configuración"}</button> : <button className="vt-top-icon" type="button" onClick={() => openSettings()} aria-label="Abrir Configuración" title="Configuración"><Icon name="settings" size={19}/></button>}
@@ -431,19 +432,19 @@ export default function App() {
               </> : <p className="vt-empty-result">Aún no hay transcripciones. Tu próximo dictado aparecerá aquí.</p>}
             </section>
             {dictationError && <div className="error vt-action-alert" role="alert"><span>{dictationError}</span>{!modelsReady && <button type="button" onClick={() => openSettings("model")}>Revisar motor</button>}</div>}
+            <div className="vt-home-actions" aria-label="Acciones de dictado">
+              {dictationState === "idle" ? <>
+                <button className="vt-text-action" type="button" disabled={!inDesktop} onClick={() => modelsReady ? void beginDictation(false) : openSettings("model")}>
+                  {modelsReady ? "Probar dictado aquí" : "Revisar motor local"}
+                </button>
+                <button className="vt-text-action" type="button" disabled={!inDesktop} onClick={() => void recoverLastResult()}>Recuperar último texto</button>
+              </> : dictationState === "recording" ? <>
+                <button className="vt-text-action is-stop" type="button" onClick={() => void finishDictation()}>Detener y transcribir</button>
+                <button className="vt-text-action" type="button" onClick={() => void abortDictation()}>Cancelar</button>
+              </> : <span className="vt-processing-action"><span className="working-dot" aria-hidden="true"/>Procesando en este equipo…</span>}
+            </div>
           </>}
         </main>
-        {view === "home" && <div className="vt-action-dock" aria-label="Acción principal">
-          {dictationState === "idle" ? <>
-            <button className="vt-primary-action" type="button" disabled={!inDesktop} onClick={() => modelsReady ? void beginDictation(false) : openSettings("model")}>
-              <Icon name={modelsReady ? "mic" : "settings"} size={17}/>{modelsReady ? "Probar dictado" : "Revisar motor local"}
-            </button>
-            {!dictationResult && inDesktop && <button className="vt-secondary-action" type="button" onClick={() => void recoverLastResult()}>Recuperar texto</button>}
-          </> : dictationState === "recording" ? <>
-            <button className="vt-primary-action is-stop" type="button" onClick={() => void finishDictation()}>Detener y transcribir</button>
-            <button className="vt-secondary-action" type="button" onClick={() => void abortDictation()}>Cancelar</button>
-          </> : <span className="vt-processing-action"><span className="working-dot" aria-hidden="true"/>Procesando en este equipo…</span>}
-        </div>}
         <nav className="vt-bottom-nav" aria-label="Navegación principal">
           <button className={view === "home" ? "active" : ""} type="button" aria-current={view === "home" ? "page" : undefined} onClick={() => setView("home")}><Icon name="home" size={18}/>Inicio</button>
           <button className={view === "history" ? "active" : ""} type="button" aria-current={view === "history" ? "page" : undefined} onClick={() => setView("history")}><Icon name="history" size={18}/>Historial</button>
@@ -451,7 +452,7 @@ export default function App() {
         </nav>
       </>}
     </div>
-    {showTutorial && <Tutorial navigate={setView} finish={() => void finishTutorial()} />}
+    {showTutorial && <Tutorial theme={settings.theme} navigate={setView} finish={() => void finishTutorial()} />}
   </>;
 }
 

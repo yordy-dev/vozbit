@@ -111,6 +111,7 @@ export interface BackupResult {
 
 export interface AppSettings {
   tutorial_version: number;
+  theme: "system" | "light" | "dark" | "contrast";
   learn_corrections: boolean;
   language: "auto" | "es" | "en";
   transcription_engine: "whisper" | "parakeet_ultra";

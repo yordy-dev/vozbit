@@ -3,6 +3,7 @@ import { VoiceTextLogo } from "./Icons";
 import "./tutorial.css";
 
 type TourView = "home" | "settings" | "dictionary";
+type Theme = "system" | "light" | "dark" | "contrast";
 type TourStep = { view: TourView; target?: string; title: string; text: string };
 type Box = { left: number; top: number; width: number; height: number; bottom: number };
 
@@ -35,7 +36,7 @@ function placeCard(box: Box | null, width: number, height: number) {
   return candidates.reduce((best, candidate) => overlap(candidate) < overlap(best) ? candidate : best);
 }
 
-export function Tutorial({ navigate, finish }: { navigate: (view: TourView) => void; finish: () => void }) {
+export function Tutorial({ theme, navigate, finish }: { theme: Theme; navigate: (view: TourView) => void; finish: () => void }) {
   const [started, setStarted] = useState(false);
   const [step, setStep] = useState(0);
   const [box, setBox] = useState<Box | null>(null);
@@ -96,11 +97,11 @@ export function Tutorial({ navigate, finish }: { navigate: (view: TourView) => v
     return () => { window.cancelAnimationFrame(frame); window.clearTimeout(timer); window.clearTimeout(lateTimer); window.removeEventListener("resize", update); window.removeEventListener("scroll", update, true); };
   }, [started, step]);
 
-  if (!started) return <div className="tour-layer" ref={dialog} role="dialog" aria-modal="true" aria-labelledby="tour-title" aria-describedby="tour-description"><div className="tour-scrim"/><div className="tour-welcome" ref={welcome}><button className="tour-close" type="button" aria-label="Omitir tutorial" onClick={finish}>×</button><span className="tour-eyebrow">BIENVENIDO A VOZBIT</span><div className="tour-mark"><VoiceTextLogo/></div><h2 id="tour-title" tabIndex={-1}>Tu voz, donde escribes</h2><p id="tour-description">Cinco pasos breves para dictar, elegir el atajo y enseñar tus palabras. No cambiaremos tus ajustes.</p><div className="tour-actions"><button className="tour-link" type="button" onClick={finish}>Entrar sin tutorial</button><button className="tour-primary" type="button" onClick={() => setStarted(true)}>Ver recorrido <span aria-hidden="true">→</span></button></div></div></div>;
+  if (!started) return <div className="tour-layer" data-theme={theme} ref={dialog} role="dialog" aria-modal="true" aria-labelledby="tour-title" aria-describedby="tour-description"><div className="tour-scrim"/><div className="tour-welcome" ref={welcome}><button className="tour-close" type="button" aria-label="Omitir tutorial" onClick={finish}>×</button><span className="tour-eyebrow">BIENVENIDO A VOZBIT</span><div className="tour-mark"><VoiceTextLogo/></div><h2 id="tour-title" tabIndex={-1}>Tu voz, donde escribes</h2><p id="tour-description">Cinco pasos breves para dictar, elegir el atajo y enseñar tus palabras. No cambiaremos tus ajustes.</p><div className="tour-actions"><button className="tour-link" type="button" onClick={finish}>Entrar sin tutorial</button><button className="tour-primary" type="button" onClick={() => setStarted(true)}>Ver recorrido <span aria-hidden="true">→</span></button></div></div></div>;
 
   const current = steps[step];
   const placement = placeCard(box, Math.min(size.width, window.innerWidth - 24), size.height);
-  return <div className="tour-layer" ref={dialog} role="dialog" aria-modal="true" aria-labelledby="tour-title" aria-describedby="tour-description">
+  return <div className="tour-layer" data-theme={theme} ref={dialog} role="dialog" aria-modal="true" aria-labelledby="tour-title" aria-describedby="tour-description">
     {!box && <div className="tour-scrim"/>}
     {box && <div className="tour-focus" style={{ left: box.left - 4, top: box.top - 4, width: box.width + 8, height: box.height + 8 }}/>} 
     <div className="tour-card" ref={card} style={{ left: placement.left, top: placement.top }}>

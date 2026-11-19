@@ -152,7 +152,12 @@ export function SettingsPanel(p: Props) {
       <section className="vt-settings-page" hidden={category !== "appearance"}>
         <h1>Apariencia</h1><p className="vt-settings-lead">Aspecto de la interfaz y del indicador mini.</p>
         <h2 className="vt-settings-group-label">INTERFAZ</h2><div className="surface settings-card">
-          <Row title="Tema de la interfaz" hint="Esta versión utiliza el tema claro."><span className="status-badge pending">Claro</span></Row>
+          <Row title="Tema de la interfaz" hint="Sistema sigue automáticamente la preferencia de Windows."><div className="vt-theme-grid" role="group" aria-label="Tema de la interfaz">{([
+            ["system", "Sistema", "Sigue Windows"],
+            ["light", "Claro", "Luminoso"],
+            ["dark", "Oscuro", "Poca luz"],
+            ["contrast", "Contraste", "Máxima lectura"],
+          ] as const).map(([value, label, detail]) => <button key={value} type="button" className={`vt-theme-option is-${value}`} aria-pressed={p.settings.theme === value} disabled={busy} onClick={() => patch({ theme: value })}><span className="vt-theme-swatch" aria-hidden="true"><i/><i/></span><strong>{label}</strong><small>{detail}</small></button>)}</div></Row>
         </div>
         <h2 className="vt-settings-group-label">INDICADOR MINI</h2><div className="surface settings-card">
           <Row title="Vista previa" hint="Aparece solo durante grabación y procesamiento. No toma el foco ni tiene botones."><div className={`vt-mini-well ${p.settings.overlay_position}`}><div className="vt-mini-pill" style={{ background: `rgba(32,42,37,${opacityDraft / 100})` }}><VoiceTextMark size={19}/><span className="vt-mini-divider"/><span className="vt-mini-wave" aria-hidden="true">{Array.from({ length: 12 }, (_, index) => <i key={index}/>)}</span></div></div></Row>

@@ -36,8 +36,11 @@ assert(files["src-tauri/src/lib.rs"].includes("tauri_plugin_single_instance::ini
 assert(files["src-tauri/src/lib.rs"].includes("database_quick_check(app.handle())"), "El arranque no comprueba la integridad de la base local");
 assert(files["src/App.tsx"].includes("settings.auto_save && !settings.private_mode"), "El frontend puede guardar durante modo privado");
 assert(files["src/SettingsPanel.tsx"].includes("Ejecutar diagnóstico") && files["src/SettingsPanel.tsx"].includes("Crear respaldo"), "Faltan acciones de diagnóstico o respaldo");
-assert(files["src/App.tsx"].includes("vt-action-dock"), "La acción principal no permanece visible en la ventana compacta");
+assert(files["src/App.tsx"].includes("vt-home-actions"), "Las acciones de dictado no aparecen en Inicio");
 assert(files["src/SettingsPanel.tsx"].includes("<Icon name={item.icon}"), "Las categorías de Configuración no tienen apoyo visual");
+assert(files["src/App.tsx"].includes("data-theme={settings.theme}"), "El tema guardado no se aplica a la interfaz");
+assert(["system", "light", "dark", "contrast"].every(theme => files["src/SettingsPanel.tsx"].includes(`[\"${theme}\"`)), "Faltan variantes de tema en Apariencia");
+assert(files["src-tauri/src/storage.rs"].includes("El tema seleccionado no es válido"), "El backend no valida el tema antes de guardarlo");
 assert(files["src/redesign.css"].includes("@media(forced-colors:active)"), "Falta soporte de colores forzados en la interfaz");
 assert(files["src/redesign.css"].includes("@media(prefers-reduced-motion:reduce)"), "Falta soporte de movimiento reducido en la interfaz");
 assert(!files["src/redesign.css"].includes(".overlay-shell"), "El rediseño de la app invade los estilos de la pastilla flotante");
@@ -46,4 +49,4 @@ assert(files["src/types.ts"].includes("code: string | null"), "El frontend no ti
 assert(files["tests/smoke-hardening-v059.mjs"].includes("if (isolatedDataDirectory)"), "La prueba destructiva no exige un perfil aislado");
 assert(files["tests/smoke-hardening-v059.mjs"].includes("se canceló la prueba destructiva"), "La prueba no verifica la ruta aislada antes de limpiar datos");
 
-console.log("26 comprobaciones estáticas de endurecimiento aprobadas");
+console.log("29 comprobaciones estáticas de endurecimiento aprobadas");

@@ -1,6 +1,6 @@
 [package]
 name = "voicetext-local"
-version = "0.5.10"
+version = "0.5.11"
 description = "Dictado local para Windows"
 authors = ["VoiceText Local"]
 edition = "2021"

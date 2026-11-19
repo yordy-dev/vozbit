@@ -1,5 +1,11 @@
 # Research material, original app artifacts, local profiles and diagnostic binaries.
 /analysis/
+/artifacts/
+/design_draft.md
+*.sqlite
+*.sqlite3
+*.sqlite3-shm
+*.sqlite3-wal
 
 # Historical/private working notes. Publish only the curated README media.
 /docs/*
@@ -9,16 +15,25 @@
 !/docs/43_IMPLEMENTACION_APRENDIZAJE_LOCAL_V0.5.10.md
 !/docs/44_REDISENO_FLUENT_2_UI.md
 !/docs/45_IMPLEMENTACION_FLUENT_2_UI_V0.5.10.md
+!/docs/46_AUDITORIA_UI_RELEASE_V0.5.11.md
+!/docs/47_INFORME_RELEASE_V0.5.11.md
 !/docs/reviews/
 /docs/reviews/*
 !/docs/reviews/fluent2/
 /docs/reviews/fluent2/*
 !/docs/reviews/fluent2/consolidated_review_report.md
+!/docs/reviews/v0511/
+/docs/reviews/v0511/*
+!/docs/reviews/v0511/consolidated_review_report.md
 !/docs/images/
 /docs/images/*
 !/docs/images/01-inicio.png
 !/docs/images/03-diccionario.png
 !/docs/images/04-configuracion.png
+!/docs/images/05-inicio-sistema.png
+!/docs/images/06-inicio-claro.png
+!/docs/images/07-inicio-oscuro.png
+!/docs/images/08-inicio-contraste.png
 !/docs/media/
 /docs/media/*
 !/docs/media/vozbit-demo.gif

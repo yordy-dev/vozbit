@@ -38,6 +38,12 @@ Vozbit es una aplicación de dictado local para Windows. Convierte tu voz en tex
 | **Diccionario personal** | **Configuración organizada** |
 | ![Diccionario personal de Vozbit](docs/images/03-diccionario.png) | ![Configuración de Vozbit](docs/images/04-configuracion.png) |
 
+### Apariencias
+
+| Sistema | Claro | Oscuro | Contraste |
+| --- | --- | --- | --- |
+| ![Tema Sistema](docs/images/05-inicio-sistema.png) | ![Tema Claro](docs/images/06-inicio-claro.png) | ![Tema Oscuro](docs/images/07-inicio-oscuro.png) | ![Tema Contraste](docs/images/08-inicio-contraste.png) |
+
 ## Cómo se usa
 
 1. **Coloca el cursor.** Haz clic en el campo donde quieres recibir el texto.
@@ -86,7 +92,7 @@ Vozbit es una aplicación de dictado local para Windows. Convierte tu voz en tex
 ## Descargar y empezar
 
 1. Descarga la [versión más reciente](https://github.com/yordy-dev/vozbit/releases/latest).
-2. Ejecuta `Vozbit_0.5.9_x64-setup.exe`.
+2. Ejecuta `Vozbit_0.5.11_x64-setup.exe`.
 3. Abre Vozbit y completa el tutorial inicial.
 4. Elige el micrófono y el motor local en **Configuración**.
 5. Coloca el cursor en un campo de texto y pulsa `Ctrl + Shift + Space`.
@@ -95,7 +101,7 @@ Vozbit es una aplicación de dictado local para Windows. Convierte tu voz en tex
 > El instalador incluye los motores, los modelos locales y WebView2 para funcionar sin descargas adicionales durante la instalación. Por eso el archivo ocupa aproximadamente 1 GB.
 
 > [!WARNING]
-> El instalador actual no tiene firma digital. Windows puede mostrar una advertencia de editor desconocido. Descárgalo únicamente desde este repositorio y compara su SHA-256 con [`SHA256SUMS-v0.5.9.txt`](SHA256SUMS-v0.5.9.txt).
+> El instalador actual no tiene firma digital. Windows puede mostrar una advertencia de editor desconocido. Descárgalo únicamente desde este repositorio y compara su SHA-256 con `SHA256SUMS-v0.5.11.txt`, incluido en la Release.
 
 ## Requisitos y compatibilidad
 

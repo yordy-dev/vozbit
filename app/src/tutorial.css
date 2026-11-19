@@ -18,6 +18,14 @@
 .tour-link { margin-right:auto; border:0; background:transparent; color:#315943; }
 .tour-secondary { border:1px solid #d7e4db; background:#fff; color:#315140; }
 .tour-primary { border:1px solid #2aa640; background:#34b84a; color:#fff; }
+.tour-layer[data-theme="dark"] { color:#f1f5f2; }
+.tour-layer[data-theme="dark"] .tour-welcome,.tour-layer[data-theme="dark"] .tour-card { border-color:#354039; background:#1a211c; box-shadow:0 12px 34px rgba(0,0,0,.55); }
+.tour-layer[data-theme="dark"] .tour-welcome p,.tour-layer[data-theme="dark"] .tour-card p { color:#b7c2ba; }
+.tour-layer[data-theme="dark"] .tour-eyebrow,.tour-layer[data-theme="dark"] .tour-card-top,.tour-layer[data-theme="dark"] .tour-link { color:#72e18e; }
+.tour-layer[data-theme="dark"] .tour-close { color:#b7c2ba; }.tour-layer[data-theme="dark"] .tour-close:hover,.tour-layer[data-theme="dark"] .tour-link:hover { background:#183c25; color:#f1f5f2; }
+.tour-layer[data-theme="dark"] .tour-secondary { border-color:#56645b; background:#111713; color:#f1f5f2; }
+.tour-layer[data-theme="contrast"] { color:#fff; }.tour-layer[data-theme="contrast"] .tour-welcome,.tour-layer[data-theme="contrast"] .tour-card { border:2px solid #fff; background:#000; box-shadow:none; }.tour-layer[data-theme="contrast"] .tour-welcome p,.tour-layer[data-theme="contrast"] .tour-card p,.tour-layer[data-theme="contrast"] .tour-close { color:#fff; }.tour-layer[data-theme="contrast"] .tour-eyebrow,.tour-layer[data-theme="contrast"] .tour-card-top,.tour-layer[data-theme="contrast"] .tour-link { color:#78ff98; }.tour-layer[data-theme="contrast"] .tour-secondary { border-color:#fff; background:#000; color:#fff; }
+@media(prefers-color-scheme:dark){.tour-layer[data-theme="system"]{color:#f1f5f2}.tour-layer[data-theme="system"] .tour-welcome,.tour-layer[data-theme="system"] .tour-card{border-color:#354039;background:#1a211c;box-shadow:0 12px 34px rgba(0,0,0,.55)}.tour-layer[data-theme="system"] .tour-welcome p,.tour-layer[data-theme="system"] .tour-card p{color:#b7c2ba}.tour-layer[data-theme="system"] .tour-eyebrow,.tour-layer[data-theme="system"] .tour-card-top,.tour-layer[data-theme="system"] .tour-link{color:#72e18e}.tour-layer[data-theme="system"] .tour-secondary{border-color:#56645b;background:#111713;color:#f1f5f2}}
 .tour-primary:hover { background:#269a3a; }
 .tour-secondary:hover { background:#f1f8f2; }
 .tour-dots { display:flex; gap:5px; margin-left:auto; margin-right:12px; }
