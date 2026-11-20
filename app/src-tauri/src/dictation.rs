@@ -174,10 +174,16 @@ pub fn dictation_last_result(last_result: State<'_, LastResultState>) -> Option<
     last_result.0.lock().ok()?.clone()
 }
 
-#[tauri::command]
-pub fn transcription_cancel() {
+pub fn cancel_processing(app: &AppHandle) {
     SESSION_CANCELLED.store(true, Ordering::Release);
     transcription::cancel();
+    hide_overlay(app);
+    let _ = app.emit("dictation://state", "idle");
+}
+
+#[tauri::command]
+pub fn transcription_cancel(app: AppHandle) {
+    cancel_processing(&app);
 }
 
 pub fn request_shutdown(state: &DictationState) {
@@ -235,6 +241,7 @@ pub async fn dictation_start(
         }
     }
     SESSION_CANCELLED.store(false, Ordering::Release);
+    transcription::reset_cancel();
     let engine = transcription::selected_engine(&app)?;
     if engine == TranscriptionEngine::ParakeetUltra {
         transcription::verify_parakeet_resources(&app)?;
@@ -375,6 +382,9 @@ pub async fn dictation_stop(
             .task
             .await
             .map_err(|error| format!("La grabación terminó inesperadamente: {error}"))??;
+        if SESSION_CANCELLED.load(Ordering::Acquire) {
+            return Err("Dictado cancelado".into());
+        }
         let captured_seconds = captured.samples.len() as f64 / 16_000.0;
         let dropped_chunks = captured.result.dropped_chunks;
         if let Ok(mut stored) = last_audio.0.lock() {
@@ -387,6 +397,9 @@ pub async fn dictation_stop(
         let worker_app = app.clone();
         let (transcript, dictionary_changes, dictionary_warning, delivery, streaming_used) =
             tauri::async_runtime::spawn_blocking(move || {
+                if SESSION_CANCELLED.load(Ordering::Acquire) {
+                    return Err("Dictado cancelado".into());
+                }
                 let (mut transcript, streaming_used) = match prefetch {
                     Some(prefetch) if session_language == language => {
                         match prefetch.finish(captured.result.input_frames) {
@@ -572,6 +585,7 @@ pub async fn dictation_reprocess(
     }
     crate::diagnostics::ensure_transcription_capacity(&app)?;
     SESSION_CANCELLED.store(false, Ordering::Release);
+    transcription::reset_cancel();
     if !matches!(language.as_str(), "auto" | "es" | "en") {
         return Err("El idioma seleccionado no es válido".into());
     }
@@ -588,6 +602,9 @@ pub async fn dictation_reprocess(
     let released_at = Instant::now();
     let worker_app = app.clone();
     let result = tauri::async_runtime::spawn_blocking(move || {
+        if SESSION_CANCELLED.load(Ordering::Acquire) {
+            return Err("Dictado cancelado".into());
+        }
         let captured_seconds = samples.len() as f64 / 16_000.0;
         let mut transcript = transcription::transcribe_pcm(&worker_app, &samples, &language)?;
         let mut dictionary_changes = 0;

@@ -45,6 +45,7 @@ assert(files["src-tauri/src/storage.rs"].includes("El tema seleccionado no es v�
 assert(files["src-tauri/src/storage.rs"].includes("transcription_to_clipboard"), "Falta persistencia para la transcripción al portapapeles");
 assert(files["src-tauri/src/shortcut.rs"].includes("ShortcutAction") && files["src-tauri/src/shortcut.rs"].includes("shortcut_action_update"), "Los atajos fijos no se pueden configurar por acción");
 assert(files["src-tauri/src/shortcut.rs"].includes("Esa combinación ya se usa para"), "Los atajos configurables no detectan conflictos");
+assert(files["src-tauri/src/shortcut.rs"].includes("crate::dictation::cancel_processing(app)"), "El atajo de cancelar no llega directamente al estado del dictado");
 assert(files["src-tauri/src/lib.rs"].includes("tauri_plugin_clipboard_manager::init"), "Falta el gestor nativo del portapapeles");
 assert(files["src/SettingsPanel.tsx"].includes("Transcripción a portapapeles"), "Falta el interruptor solicitado en Texto y salida");
 assert(files["src/App.tsx"].includes("writeClipboardText(completed.transcript.text)"), "La transcripción terminada no se copia automáticamente");
@@ -56,4 +57,4 @@ assert(files["src/types.ts"].includes("code: string | null"), "El frontend no ti
 assert(files["tests/smoke-hardening-v059.mjs"].includes("if (isolatedDataDirectory)"), "La prueba destructiva no exige un perfil aislado");
 assert(files["tests/smoke-hardening-v059.mjs"].includes("se canceló la prueba destructiva"), "La prueba no verifica la ruta aislada antes de limpiar datos");
 
-console.log("35 comprobaciones estáticas de endurecimiento aprobadas");
+console.log("36 comprobaciones estáticas de endurecimiento aprobadas");

@@ -30,6 +30,10 @@ pub fn cancel() {
     CANCEL_REQUESTED.store(true, Ordering::Release);
 }
 
+pub(crate) fn reset_cancel() {
+    CANCEL_REQUESTED.store(false, Ordering::Release);
+}
+
 pub(crate) fn cleanup_stale_files(app: &AppHandle) -> Result<usize, String> {
     let directory = app
         .path()
@@ -113,7 +117,6 @@ impl TranscriptionGuard {
         TRANSCRIPTION_ACTIVE
             .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
             .map_err(|_| "Ya se está transcribiendo un audio".to_string())?;
-        CANCEL_REQUESTED.store(false, Ordering::Release);
         Ok(Self)
     }
 }
@@ -410,6 +413,7 @@ pub async fn transcription_transcribe_diagnostic(
     language: String,
 ) -> Result<TranscriptionResult, String> {
     let guard = TranscriptionGuard::acquire()?;
+    reset_cancel();
     tauri::async_runtime::spawn_blocking(move || {
         let _guard = guard;
         run_transcription(&app, &path, &language)
@@ -487,6 +491,9 @@ fn transcribe_pcm_inner(
     preload: Option<ParakeetPreload>,
 ) -> Result<TranscriptionResult, String> {
     let _guard = TranscriptionGuard::acquire()?;
+    if CANCEL_REQUESTED.load(Ordering::Acquire) {
+        return Err("Transcripción cancelada".into());
+    }
     if samples.len() < 16_000 {
         return Err("Graba al menos un segundo antes de transcribir".into());
     }
@@ -867,3 +874,19 @@ fn run_whisper(
 
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
+
+#[cfg(test)]
+mod cancellation_tests {
+    use super::*;
+
+    #[test]
+    fn acquiring_the_engine_does_not_erase_a_pending_cancellation() {
+        TRANSCRIPTION_ACTIVE.store(false, Ordering::Release);
+        reset_cancel();
+        cancel();
+        let guard = TranscriptionGuard::acquire().expect("engine guard");
+        assert!(CANCEL_REQUESTED.load(Ordering::Acquire));
+        drop(guard);
+        reset_cancel();
+    }
+}

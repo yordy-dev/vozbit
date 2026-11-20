@@ -180,7 +180,7 @@ fn dispatch(app: &AppHandle, action: ShortcutAction, state: ShortcutState) {
             );
         }
         ShortcutAction::Cancel if state == ShortcutState::Pressed => {
-            crate::transcription::cancel();
+            crate::dictation::cancel_processing(app);
             let _ = app.emit("shortcut://cancel", ());
         }
         ShortcutAction::Reprocess if state == ShortcutState::Pressed => {
