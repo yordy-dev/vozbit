@@ -2,14 +2,14 @@ import { useEffect, useEffectEvent, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { availableMonitors, getCurrentWindow, LogicalSize, PhysicalPosition } from "@tauri-apps/api/window";
-import { cancelDictation, forgetLastAudio, getLastDictation, getModelStatus, getSettings, getShortcutStatus, inDesktop, listInputDevices, listenDictationError, listenMicLevel, listenShortcutState, listenShortcutToggle, patchSettings, reprocessDictation, saveHistory, startDictation, stopDictation, testInputDevice, updateShortcut } from "./api";
+import { cancelDictation, forgetLastAudio, getLastDictation, getModelStatus, getSettings, getShortcutsStatus, inDesktop, listInputDevices, listenDictationError, listenMicLevel, listenShortcutState, listenShortcutToggle, patchSettings, reprocessDictation, saveHistory, startDictation, stopDictation, testInputDevice, updateShortcutAction, writeClipboardText } from "./api";
 import { DictionaryPanel } from "./DictionaryPanel";
 import { HistoryPanel } from "./HistoryPanel";
 import { Icon, VoiceTextLogo } from "./Icons";
 import { SettingsPanel } from "./SettingsPanel";
 import Help from "./Help";
 import { Tutorial } from "./Tutorial";
-import type { AppSettings, AudioDevice, DictationResult, MicLevel, ModelStatus, ShortcutStatus } from "./types";
+import type { AppSettings, AudioDevice, DictationResult, MicLevel, ModelStatus, ShortcutAction, ShortcutBindings } from "./types";
 import { version as appVersion } from "../package.json";
 import "./dictation.css";
 
@@ -28,6 +28,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   auto_save: true,
   private_mode: false,
   append_trailing_space: true,
+  transcription_to_clipboard: false,
   text_correction: true,
   format_numbers: true,
   math_symbols: true,
@@ -47,7 +48,7 @@ export default function App() {
   const [devices, setDevices] = useState<AudioDevice[]>([]);
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   const [model, setModel] = useState<ModelStatus | null>(null);
-  const [shortcut, setShortcut] = useState<ShortcutStatus | null>(null);
+  const [shortcuts, setShortcuts] = useState<ShortcutBindings | null>(null);
   const [settingsError, setSettingsError] = useState("");
   const [dictationState, setDictationState] = useState<DictationState>("idle");
   const [dictationStartedAt, setDictationStartedAt] = useState<number | null>(null);
@@ -76,6 +77,8 @@ export default function App() {
     : Boolean(model?.available && model.sha256_ok && model.engine_available && model.vad_sha256_ok);
   const whisperReady = Boolean(model?.available && model.sha256_ok && model.engine_available && model.vad_sha256_ok);
   const parakeetReady = Boolean(model?.parakeet_available && model.parakeet_sha256_ok && model.parakeet_engine_available && model.parakeet_vad_sha256_ok);
+  const shortcut = shortcuts?.transcription ?? null;
+  const unavailableShortcut = shortcuts ? Object.values(shortcuts).find(item => !item.registered) : null;
 
   useEffect(() => {
     if (!inDesktop) return;
@@ -131,7 +134,7 @@ export default function App() {
       }).catch((reason: unknown) => setSettingsError(`No se pudieron enumerar los micrófonos. Puedes intentar con el predeterminado de Windows: ${errorText(reason)}`));
     }).catch((reason: unknown) => setSettingsError(`No se pudo preparar la configuración: ${errorText(reason)}`));
     void getModelStatus().then(setModel).catch((reason: unknown) => setSettingsError(`No se pudo verificar el modelo: ${errorText(reason)}`));
-    void getShortcutStatus().then(setShortcut).catch((reason: unknown) => setDictationError(`No se pudo verificar el atajo: ${errorText(reason)}`));
+    void getShortcutsStatus().then(setShortcuts).catch((reason: unknown) => setDictationError(`No se pudieron verificar los atajos: ${errorText(reason)}`));
   }, []);
 
   useEffect(() => {
@@ -268,10 +271,20 @@ export default function App() {
     }
   }
 
-  async function changeShortcut(next: string) {
+  async function changeShortcut(action: ShortcutAction, next: string) {
     setSettingsError("");
-    try { setShortcut(await updateShortcut(next)); }
+    try { setShortcuts(await updateShortcutAction(action, next)); }
     catch (reason) { setSettingsError(errorText(reason)); throw reason; }
+  }
+
+  async function copyCompletedTranscription(completed: DictationResult): Promise<string | null> {
+    if (!settings.transcription_to_clipboard) return null;
+    try {
+      await writeClipboardText(completed.transcript.text);
+      return "Transcripción copiada al portapapeles.";
+    } catch (reason) {
+      return `No se pudo copiar al portapapeles: ${errorText(reason)}`;
+    }
   }
 
   async function beginDictation(fromShortcut = false) {
@@ -303,17 +316,21 @@ export default function App() {
     try {
       const completed = await stopDictation(settings.language);
       setDictationResult(completed);
+      const messages: string[] = [];
       if (settings.auto_save && !settings.private_mode) {
         try {
           const id = await saveHistory(completed);
           setSavedHistoryId(id);
           setHistoryRevision((current) => current + 1);
-          setCopyStatus("Guardado automáticamente en Inicio.");
+          messages.push("Guardado automáticamente en Inicio.");
         } catch (reason) {
-          setCopyStatus(`El texto está disponible, pero no se guardó en el historial: ${errorText(reason)}`);
+          messages.push(`El texto está disponible, pero no se guardó en el historial: ${errorText(reason)}`);
         }
       }
-      if (settings.private_mode) setCopyStatus("Modo privado: el texto no se guardó y el audio no se conservará.");
+      if (settings.private_mode) messages.push("Modo privado: el texto no se guardó y el audio no se conservará.");
+      const clipboardMessage = await copyCompletedTranscription(completed);
+      if (clipboardMessage) messages.push(clipboardMessage);
+      setCopyStatus(messages.join(" "));
     } catch (reason) {
       const message = errorText(reason);
       if (message === "Dictado cancelado" || message === "Transcripción cancelada") setCopyStatus("Dictado cancelado; no se insertó texto.");
@@ -338,17 +355,21 @@ export default function App() {
     try {
       const completed = await reprocessDictation(settings.language);
       setDictationResult(completed);
+      const messages: string[] = [];
       if (settings.auto_save && !settings.private_mode) {
         try {
           const id = await saveHistory(completed);
           setSavedHistoryId(id);
           setHistoryRevision((current) => current + 1);
-          setCopyStatus("Reprocesado y guardado automáticamente en Inicio.");
+          messages.push("Reprocesado y guardado automáticamente en Inicio.");
         } catch (reason) {
-          setCopyStatus(`Reprocesado, pero no guardado en el historial: ${errorText(reason)}`);
+          messages.push(`Reprocesado, pero no guardado en el historial: ${errorText(reason)}`);
         }
       }
-      if (settings.private_mode) setCopyStatus("Modo privado: el texto reprocesado no se guardó.");
+      if (settings.private_mode) messages.push("Modo privado: el texto reprocesado no se guardó.");
+      const clipboardMessage = await copyCompletedTranscription(completed);
+      if (clipboardMessage) messages.push(clipboardMessage);
+      setCopyStatus(messages.join(" "));
     } catch (reason) {
       setDictationError(errorText(reason));
       throw reason;
@@ -399,15 +420,15 @@ export default function App() {
       </header>
 
       {expanded ? <main className="vt-expanded-main">
-        {view === "settings" ? <SettingsPanel initialCategory={settingsCategory} devices={devices} settings={settings} model={model} shortcut={shortcut} lastResult={dictationResult} error={settingsError} onPatch={patchAppSettings} onShortcutChange={changeShortcut} onTestMicrophone={() => testInputDevice(settings.preferred_device_id, false)} onRefreshModel={async () => { setModel(await getModelStatus()); setSettingsError(""); }} onRefreshDevices={async () => { setDevices(await listInputDevices()); setSettingsError(""); }} onReprocess={reprocessLast} onHelp={() => setView("help")} onAbout={() => setView("about")} onRepeatTutorial={() => { setView("home"); setShowTutorial(true); }}/>
-        : view === "help" ? <div className="vt-expanded-page"><Help onRepeatTutorial={() => { setView("home"); setShowTutorial(true); }}/></div>
+        {view === "settings" ? <SettingsPanel initialCategory={settingsCategory} devices={devices} settings={settings} model={model} shortcuts={shortcuts} lastResult={dictationResult} error={settingsError} onPatch={patchAppSettings} onShortcutChange={changeShortcut} onTestMicrophone={() => testInputDevice(settings.preferred_device_id, false)} onRefreshModel={async () => { setModel(await getModelStatus()); setSettingsError(""); }} onRefreshDevices={async () => { setDevices(await listInputDevices()); setSettingsError(""); }} onReprocess={reprocessLast} onHelp={() => setView("help")} onAbout={() => setView("about")} onRepeatTutorial={() => { setView("home"); setShowTutorial(true); }}/>
+        : view === "help" ? <div className="vt-expanded-page"><Help shortcuts={shortcuts} onRepeatTutorial={() => { setView("home"); setShowTutorial(true); }}/></div>
         : <div className="vt-expanded-page"><InfoPage title="Acerca de Vozbit" text="Aplicación independiente de dictado para Windows. Usa motores locales de voz; no requiere cuenta ni suscripción."/></div>}
       </main> : <>
         <main className="vt-compact-main">
           {view === "dictionary" ? <DictionaryPanel learningEnabled={settings.learn_corrections} onToggleLearning={(enabled) => patchAppSettings({ learn_corrections: enabled })} /> : view === "history" ? <><header className="vt-screen-header"><h1>Historial</h1><p>Transcripciones guardadas en este equipo.</p></header><HistoryPanel revision={historyRevision}/></> : <>
             {!inDesktop && <div className="notice">Abre la aplicación de escritorio para usar el micrófono y el motor local.</div>}
             {settingsError && <div className="error vt-action-alert" role="alert"><span>{settingsError}</span><button type="button" onClick={() => openSettings("general")}>Abrir configuración</button></div>}
-            {shortcut && !shortcut.registered && <div className="error vt-action-alert" role="alert"><span>El atajo no está disponible.</span><button type="button" onClick={() => openSettings("general")}>Cambiar atajo</button></div>}
+            {unavailableShortcut && <div className="error vt-action-alert" role="alert"><span>Uno de los atajos no está disponible.</span><button type="button" onClick={() => openSettings("general")}>Cambiar atajo</button></div>}
             <section className={`surface vt-status-card ${dictationState}`} aria-live="polite">
               <div className="vt-status-heading"><span className={`vt-status-dot ${dictationState === "idle" && !modelsReady ? "warning" : dictationState}`}/><strong>{statusText}</strong></div>
               <p>{statusDescription}</p>

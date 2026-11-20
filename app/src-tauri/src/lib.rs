@@ -90,6 +90,7 @@ pub fn run() {
             show_main(app, None);
         }))
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
@@ -251,6 +252,8 @@ pub fn run() {
             storage::data_backup_create,
             shortcut::shortcut_status,
             shortcut::shortcut_update,
+            shortcut::shortcuts_status,
+            shortcut::shortcut_action_update,
             storage::dictionary_list,
             storage::dictionary_upsert,
             storage::dictionary_delete,

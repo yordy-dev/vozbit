@@ -77,6 +77,15 @@ export interface ShortcutStatus {
   error: string | null;
 }
 
+export type ShortcutAction = "transcription" | "cancel" | "reprocess" | "learn_selected";
+
+export interface ShortcutBindings {
+  transcription: ShortcutStatus;
+  cancel: ShortcutStatus;
+  reprocess: ShortcutStatus;
+  learn_selected: ShortcutStatus;
+}
+
 export interface DictionaryEntry {
   term: string;
   replacement: string;
@@ -120,6 +129,7 @@ export interface AppSettings {
   auto_save: boolean;
   private_mode: boolean;
   append_trailing_space: boolean;
+  transcription_to_clipboard: boolean;
   text_correction: boolean;
   format_numbers: boolean;
   math_symbols: boolean;

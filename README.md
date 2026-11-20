@@ -67,11 +67,11 @@ Vozbit es una aplicación de dictado local para Windows. Convierte tu voz en tex
 
 ### Dictado y entrega
 
-- Atajo global configurable, con modo pulsar o mantener presionado.
+- Atajos globales configurables para transcribir, cancelar, reprocesar y agregar una palabra seleccionada.
 - Selección de micrófono e idioma desde la aplicación.
 - Entrega al campo de texto activo mediante funciones locales de Windows.
 - Indicador flotante para grabación, procesamiento, finalización y errores.
-- Reprocesamiento del último audio y copia manual desde Inicio.
+- Reprocesamiento del último audio, copia manual desde Inicio y copia automática opcional al portapapeles.
 
 ### Transcripción y formato
 

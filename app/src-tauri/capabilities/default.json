@@ -3,5 +3,5 @@
   "identifier": "default",
   "description": "Permisos mínimos para la ventana principal",
   "windows": ["main"],
-  "permissions": ["core:default", "core:window:allow-set-size", "core:window:allow-outer-position", "core:window:allow-outer-size", "core:window:allow-available-monitors", "core:window:allow-set-position"]
+  "permissions": ["core:default", "core:window:allow-set-size", "core:window:allow-outer-position", "core:window:allow-outer-size", "core:window:allow-available-monitors", "core:window:allow-set-position", "clipboard-manager:allow-write-text"]
 }

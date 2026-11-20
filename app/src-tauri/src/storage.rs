@@ -63,6 +63,7 @@ pub struct AppSettings {
     auto_save: bool,
     private_mode: bool,
     append_trailing_space: bool,
+    transcription_to_clipboard: bool,
     text_correction: bool,
     format_numbers: bool,
     math_symbols: bool,
@@ -86,6 +87,7 @@ pub struct SettingsPatch {
     auto_save: Option<bool>,
     private_mode: Option<bool>,
     append_trailing_space: Option<bool>,
+    transcription_to_clipboard: Option<bool>,
     text_correction: Option<bool>,
     format_numbers: Option<bool>,
     math_symbols: Option<bool>,
@@ -199,6 +201,9 @@ pub async fn settings_get(app: AppHandle) -> Result<AppSettings, String> {
             private_mode: read_setting(&app, "private_mode")?.as_deref() == Some("true"),
             append_trailing_space: read_setting(&app, "append_trailing_space")?.as_deref()
                 != Some("false"),
+            transcription_to_clipboard: read_setting(&app, "transcription_to_clipboard")?
+                .as_deref()
+                == Some("true"),
             text_correction: read_setting(&app, "text_correction")?.as_deref() != Some("false"),
             format_numbers: read_setting(&app, "format_numbers")?.as_deref() != Some("false"),
             math_symbols: read_setting(&app, "math_symbols")?.as_deref() != Some("false"),
@@ -310,6 +315,9 @@ pub async fn settings_patch(app: AppHandle, patch: SettingsPatch) -> Result<(), 
         }
         if let Some(enabled) = patch.append_trailing_space {
             write_setting(&app, "append_trailing_space", if enabled { "true" } else { "false" })?;
+        }
+        if let Some(enabled) = patch.transcription_to_clipboard {
+            write_setting(&app, "transcription_to_clipboard", if enabled { "true" } else { "false" })?;
         }
         if let Some(enabled) = patch.text_correction {
             write_setting(&app, "text_correction", if enabled { "true" } else { "false" })?;

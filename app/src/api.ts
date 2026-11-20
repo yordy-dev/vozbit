@@ -1,6 +1,6 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import type { AppSettings, AudioDevice, AudioTestResult, BackupResult, DiagnosticReport, DictionaryEntry, DictionaryPreview, DictationResult, HistoryItem, MicLevel, ModelStatus, ShortcutStatus, TranscriptionResult } from "./types";
+import type { AppSettings, AudioDevice, AudioTestResult, BackupResult, DiagnosticReport, DictionaryEntry, DictionaryPreview, DictationResult, HistoryItem, MicLevel, ModelStatus, ShortcutAction, ShortcutBindings, ShortcutStatus, TranscriptionResult } from "./types";
 
 export const inDesktop = isTauri();
 
@@ -95,6 +95,10 @@ export async function getShortcutStatus(): Promise<ShortcutStatus> {
   return invoke<ShortcutStatus>("shortcut_status");
 }
 
+export async function getShortcutsStatus(): Promise<ShortcutBindings> {
+  return invoke<ShortcutBindings>("shortcuts_status");
+}
+
 export async function listenShortcutState(handler: (state: "pressed" | "released") => void): Promise<UnlistenFn> {
   return listen<"pressed" | "released">("shortcut://state", (event) => handler(event.payload));
 }
@@ -129,4 +133,12 @@ export async function patchSettings(patch: Partial<AppSettings>): Promise<void> 
 
 export async function updateShortcut(shortcut: string): Promise<ShortcutStatus> {
   return invoke<ShortcutStatus>("shortcut_update", { shortcut });
+}
+
+export async function updateShortcutAction(action: ShortcutAction, shortcut: string): Promise<ShortcutBindings> {
+  return invoke<ShortcutBindings>("shortcut_action_update", { action, shortcut });
+}
+
+export async function writeClipboardText(text: string): Promise<void> {
+  return invoke<void>("plugin:clipboard-manager|write_text", { text, label: null });
 }

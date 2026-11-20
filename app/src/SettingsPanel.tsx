@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { createDataBackup, exportDiagnostics, runDiagnostics } from "./api";
 import { Icon, VoiceTextMark, type IconName } from "./Icons";
-import type { AppSettings, AudioDevice, AudioTestResult, DiagnosticReport, DictationResult, ModelStatus, ShortcutStatus } from "./types";
+import type { AppSettings, AudioDevice, AudioTestResult, DiagnosticReport, DictationResult, ModelStatus, ShortcutAction, ShortcutBindings } from "./types";
 import "./settings.css";
 
 type Category = "general" | "model" | "output" | "appearance" | "data" | "help";
@@ -12,11 +12,11 @@ interface Props {
   devices: AudioDevice[];
   settings: AppSettings;
   model: ModelStatus | null;
-  shortcut: ShortcutStatus | null;
+  shortcuts: ShortcutBindings | null;
   lastResult: DictationResult | null;
   error: string;
   onPatch: (patch: Partial<AppSettings>) => Promise<void>;
-  onShortcutChange: (shortcut: string) => Promise<void>;
+  onShortcutChange: (action: ShortcutAction, shortcut: string) => Promise<void>;
   onTestMicrophone: () => Promise<AudioTestResult>;
   onRefreshModel: () => Promise<void>;
   onRefreshDevices: () => Promise<void>;
@@ -39,9 +39,21 @@ const categories: { id: Category; label: string; icon: IconName }[] = [
   { id: "help", label: "Ayuda y acerca de", icon: "help" },
 ];
 
+const shortcutDefaults: Record<ShortcutAction, string> = {
+  transcription: "Ctrl+Shift+Space",
+  cancel: "Ctrl+Alt+Escape",
+  reprocess: "Ctrl+Alt+Space",
+  learn_selected: "Ctrl+Alt+L",
+};
+
 export function SettingsPanel(p: Props) {
   const [category, setCategory] = useState<Category>(p.initialCategory ?? "general");
-  const [candidate, setCandidate] = useState(p.shortcut?.shortcut ?? "Ctrl+Shift+Space");
+  const [shortcutCandidates, setShortcutCandidates] = useState<Record<ShortcutAction, string>>({
+    transcription: p.shortcuts?.transcription.shortcut ?? shortcutDefaults.transcription,
+    cancel: p.shortcuts?.cancel.shortcut ?? shortcutDefaults.cancel,
+    reprocess: p.shortcuts?.reprocess.shortcut ?? shortcutDefaults.reprocess,
+    learn_selected: p.shortcuts?.learn_selected.shortcut ?? shortcutDefaults.learn_selected,
+  });
   const [message, setMessage] = useState("");
   const [failed, setFailed] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -54,7 +66,15 @@ export function SettingsPanel(p: Props) {
   const parakeetReady = Boolean(p.model?.parakeet_available && p.model.parakeet_sha256_ok && p.model.parakeet_engine_available && p.model.parakeet_vad_sha256_ok);
 
   useEffect(() => { void invoke<boolean>("dictation_status").then(setHasAudio).catch(() => undefined); }, []);
-  useEffect(() => { if (p.shortcut) setCandidate(p.shortcut.shortcut); }, [p.shortcut]);
+  useEffect(() => {
+    if (!p.shortcuts) return;
+    setShortcutCandidates({
+      transcription: p.shortcuts.transcription.shortcut,
+      cancel: p.shortcuts.cancel.shortcut,
+      reprocess: p.shortcuts.reprocess.shortcut,
+      learn_selected: p.shortcuts.learn_selected.shortcut,
+    });
+  }, [p.shortcuts]);
   useEffect(() => { if (p.initialCategory) setCategory(p.initialCategory); }, [p.initialCategory]);
   useEffect(() => setOpacityDraft(p.settings.overlay_opacity), [p.settings.overlay_opacity]);
   useEffect(() => {
@@ -89,6 +109,39 @@ export function SettingsPanel(p: Props) {
   const toggle = (key: keyof AppSettings, label: string) => <button type="button" role="switch" className="switch" aria-label={label} aria-checked={Boolean(p.settings[key])} disabled={busy} onClick={() => patch({ [key]: !p.settings[key] })}><span /></button>;
   const selectCategory = (next: Category) => { setCategory(next); setMessage(""); setFailed(false); };
 
+  const shortcutEditor = (action: ShortcutAction, label: string) => {
+    const status = p.shortcuts?.[action];
+    const candidate = shortcutCandidates[action];
+    return <div className="setting-control shortcut-editor" data-tour={action === "transcription" ? "shortcut" : undefined}>
+      <input
+        aria-label={label}
+        aria-invalid={status?.error ? "true" : undefined}
+        value={candidate}
+        disabled={busy}
+        readOnly
+        onKeyDown={event => {
+          if (event.key === "Tab") return;
+          event.preventDefault();
+          if (["Control", "Alt", "Shift", "Meta"].includes(event.key)) {
+            if (action === "transcription" && event.ctrlKey && event.shiftKey && !event.altKey && !event.metaKey) {
+              setShortcutCandidates(current => ({ ...current, [action]: "Ctrl+Shift" }));
+            }
+            return;
+          }
+          const key = event.key === " " ? "Space" : event.key === "Esc" ? "Escape" : event.key.length === 1 ? event.key.toUpperCase() : event.key;
+          const next = [event.ctrlKey ? "Ctrl" : "", event.altKey ? "Alt" : "", event.shiftKey ? "Shift" : "", event.metaKey ? "Meta" : "", key].filter(Boolean).join("+");
+          setShortcutCandidates(current => ({ ...current, [action]: next }));
+        }}
+      />
+      <button type="button" disabled={busy || candidate === status?.shortcut} onClick={() => void actionTask(action, candidate)}>Guardar</button>
+      <button type="button" disabled={busy} title={`Restaurar ${shortcutDefaults[action]}`} aria-label={`Restaurar ${label}`} onClick={() => { const next = shortcutDefaults[action]; setShortcutCandidates(current => ({ ...current, [action]: next })); void actionTask(action, next); }}>↺</button>
+    </div>;
+  };
+
+  const actionTask = async (shortcutAction: ShortcutAction, shortcut: string) => {
+    await action(() => p.onShortcutChange(shortcutAction, shortcut), "Atajo guardado");
+  };
+
   async function diagnose() {
     await action(async () => {
       const report = await runDiagnostics();
@@ -113,9 +166,9 @@ export function SettingsPanel(p: Props) {
       <section className="vt-settings-page" hidden={category !== "general"}>
         <h1>General</h1><p className="vt-settings-lead">Atajo, modo y micrófono para dictar desde cualquier aplicación.</p>
         <h2 className="vt-settings-group-label">CONTROL DEL DICTADO</h2><div className="surface settings-card">
-          <Row title="Atajo de transcripción" hint="Haz clic y pulsa una combinación. Si Ctrl + Shift interfiere con tu editor, elige otra."><div className="setting-control" data-tour="shortcut"><input aria-label="Atajo de transcripción" value={candidate} disabled={busy} onChange={event => setCandidate(event.target.value)} onKeyDown={event => { if (event.key === "Tab") return; event.preventDefault(); if (["Control", "Alt", "Shift", "Meta"].includes(event.key)) { if (event.ctrlKey && event.shiftKey && !event.altKey) setCandidate("Ctrl+Shift"); return; } setCandidate([event.ctrlKey ? "Ctrl" : "", event.altKey ? "Alt" : "", event.shiftKey ? "Shift" : "", event.key === " " ? "Space" : event.key.length === 1 ? event.key.toUpperCase() : event.key].filter(Boolean).join("+")); }} /><button type="button" disabled={busy || candidate === p.shortcut?.shortcut} onClick={() => void action(() => p.onShortcutChange(candidate))}>Guardar</button><button type="button" disabled={busy} title="Restaurar Ctrl + Shift + Espacio" aria-label="Restaurar atajo" onClick={() => { setCandidate("Ctrl+Shift+Space"); void action(() => p.onShortcutChange("Ctrl+Shift+Space")); }}>↺</button></div></Row>
+          <Row title="Atajo de transcripción" hint="Haz clic en el campo y pulsa una combinación. Si Ctrl + Shift interfiere con tu editor, elige otra.">{shortcutEditor("transcription", "Atajo de transcripción")}</Row>
           <Row title="Modo de grabación" hint="El indicador no tiene botones; se controla con el teclado."><select disabled={busy} aria-label="Modo de grabación" value={p.settings.push_to_talk ? "hold" : "toggle"} onChange={event => patch({ push_to_talk: event.target.value === "hold" })}><option value="toggle">Pulsar para iniciar / detener</option><option value="hold">Mantener y soltar</option></select></Row>
-          <Row title="Cancelar dictado" hint="Detiene la grabación o el procesamiento sin entregar texto."><kbd>Ctrl + Alt + Esc</kbd></Row>
+          <Row title="Cancelar dictado" hint="Detiene la grabación o el procesamiento sin entregar texto.">{shortcutEditor("cancel", "Atajo para cancelar dictado")}</Row>
         </div>
         <h2 className="vt-settings-group-label">MICRÓFONO E IDIOMA</h2><div className="surface settings-card">
           <Row title="Micrófono" hint="Automático sigue el dispositivo predeterminado de Windows."><div className="setting-control"><select disabled={busy} aria-label="Micrófono" value={p.settings.preferred_device_id} onChange={event => patch({ preferred_device_id: event.target.value })}><option value="default">Automático — Windows</option>{p.devices.map(device => <option key={device.id} value={device.id}>{device.name}</option>)}</select><button type="button" disabled={busy} aria-label="Actualizar micrófonos" onClick={() => void action(p.onRefreshDevices, "Micrófonos actualizados")}>↺</button></div></Row>
@@ -142,10 +195,11 @@ export function SettingsPanel(p: Props) {
           <Row title="Números en cifras">{toggle("format_numbers", "Números en cifras")}</Row>
           <Row title="Operadores matemáticos">{toggle("math_symbols", "Operadores matemáticos")}</Row>
           <Row title="Espacio al terminar">{toggle("append_trailing_space", "Espacio al terminar")}</Row>
+          <Row title="Transcripción a portapapeles" hint="Copia automáticamente cada transcripción terminada, llegue o no al campo de destino.">{toggle("transcription_to_clipboard", "Transcripción a portapapeles")}</Row>
         </div>
         <h2 className="vt-settings-group-label">DICCIONARIO</h2><div className="surface settings-card">
           <Row title="Aprender de mis correcciones" hint="Observa durante 30 segundos el campo del último dictado. Si sustituyes una palabra, guarda la forma correcta y la aplica en futuros dictados. Todo se procesa localmente.">{toggle("learn_corrections", "Aprender de mis correcciones")}</Row>
-          <Row title="Agregar palabra seleccionada" hint="Selecciona texto en un editor compatible."><kbd>Ctrl + Alt + L</kbd></Row>
+          <Row title="Agregar palabra seleccionada" hint="Selecciona texto en un editor compatible.">{shortcutEditor("learn_selected", "Atajo para agregar palabra seleccionada")}</Row>
         </div>
       </section>
 
@@ -177,12 +231,13 @@ export function SettingsPanel(p: Props) {
           <Row title="Guardar transcripciones" hint={p.settings.private_mode ? "Pausado mientras el modo privado esté activo." : "Solo en este equipo."}>{toggle("auto_save", "Guardar transcripciones")}</Row>
           <Row title="Entradas recientes" hint="Los favoritos se conservan aparte."><select disabled={busy} aria-label="Límite de historial" value={p.settings.history_limit} onChange={event => patch({ history_limit: Number(event.target.value) })}>{[20, 50, 100, 250, 500].map(value => <option key={value} value={value}>{value}</option>)}</select></Row>
           <Row title="Reprocesar último audio" hint={p.settings.private_mode ? "No disponible en modo privado." : "Disponible solo durante esta sesión. No vuelve a insertar en otra app."}><button className="soft-button" type="button" disabled={!hasAudio || busy || p.settings.private_mode} onClick={() => void action(p.onReprocess, "Reprocesado")}>Reprocesar</button></Row>
+          <Row title="Atajo para reprocesar" hint="Reprocesa el último audio disponible cuando Vozbit está inactivo.">{shortcutEditor("reprocess", "Atajo para reprocesar último audio")}</Row>
         </div>
         <h2 className="vt-settings-group-label">RESPALDO</h2><div className="surface settings-card">
           <Row title="Crear respaldo local" hint="Guarda configuración, historial y diccionario en la carpeta local de Vozbit. El archivo puede contener texto sensible."><button className="soft-button" type="button" disabled={busy} onClick={() => void action(async () => { const backup = await createDataBackup(); return `Respaldo creado: ${backup.history_entries} textos y ${backup.dictionary_entries} reglas · ${backup.path}`; })}>Crear respaldo</button></Row>
         </div>
         <details className="settings-extra"><summary>Diagnóstico local <span>Avanzado</span></summary><div className="surface settings-card" aria-label="Diagnóstico local sin contenido del dictado">
-          <Row title="Atajo global"><span className="diagnostic-value">{p.shortcut?.registered ? `Activo: ${p.shortcut.shortcut}` : "No registrado; cambia la combinación"}</span></Row>
+          <Row title="Atajos globales"><span className="diagnostic-value">{p.shortcuts ? `${Object.values(p.shortcuts).filter(item => item.registered).length} de 4 activos` : "Comprobando"}</span></Row>
           <Row title="Modelo y voz"><span className="diagnostic-value">{(p.settings.transcription_engine === "parakeet_ultra" ? parakeetReady : whisperReady) ? "Modelo y detector listos" : "Revisar modelo o detector"}</span></Row>
           <Row title="Último dictado" hint="Solo métricas de esta sesión; aquí no se muestra audio ni texto."><span className="diagnostic-value">{p.lastResult ? `${p.lastResult.captured_seconds.toFixed(1)} s de audio · ${(p.lastResult.post_release_ms / 1000).toFixed(1)} s desde soltar · ${(p.lastResult.transcript.inference_ms / 1000).toFixed(1)} s de motor · ${p.lastResult.prefetched_segments} fragmentos anticipados · ${p.lastResult.dropped_chunks} fragmentos perdidos` : "Sin dictados en esta sesión"}</span></Row>
           <Row title="Almacenamiento y temporales" hint="No incluye audio ni texto dictado."><button className="soft-button" type="button" disabled={busy} onClick={() => void diagnose()}>Ejecutar diagnóstico</button></Row>
